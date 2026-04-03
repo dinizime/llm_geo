@@ -5,6 +5,7 @@ import logging
 import os
 import time
 from dataclasses import dataclass, field
+from typing import Callable
 
 from openai import APIStatusError, OpenAI, RateLimitError
 
@@ -56,7 +57,6 @@ def _parse_tool_args(raw: str) -> dict:
         return json.loads(raw)
     except json.JSONDecodeError:
         pass
-    # Some models concatenate multiple JSON objects -- extract the first one
     depth = 0
     for i, ch in enumerate(raw):
         if ch == "{":
@@ -71,11 +71,21 @@ def _parse_tool_args(raw: str) -> dict:
     return {}
 
 
+def _emit(on_event: Callable | None, event: dict):
+    """Safely emit an event via callback."""
+    if on_event:
+        try:
+            on_event(event)
+        except Exception:
+            pass
+
+
 def run_agent(
     query: str,
     client: OpenAI | None = None,
     model: str | None = None,
     provider_config: ProviderConfig | None = None,
+    on_event: Callable[[dict], None] | None = None,
 ) -> AgentResult:
     if client is None:
         client, provider_config = _create_client()
@@ -101,6 +111,11 @@ def run_agent(
 
     for iteration in range(MAX_ITERATIONS):
         log.debug("iter=%d calling %s (%d messages)", iteration + 1, model, len(messages))
+        _emit(on_event, {
+            "type": "thinking",
+            "iteration": iteration + 1,
+            "message": "Analisando a pergunta..." if iteration == 0 else "Processando resultados...",
+        })
 
         response = None
         for attempt in range(MAX_RETRIES):
@@ -119,17 +134,15 @@ def run_agent(
                 retry_after = getattr(e.response, "headers", {}).get("retry-after")
                 wait = float(retry_after) if retry_after else RETRY_BASE_DELAY * (2 ** (attempt + 1))
                 log.warning("  rate-limited (attempt %d/%d), waiting %.0fs", attempt + 1, MAX_RETRIES, wait)
+                _emit(on_event, {"type": "retry", "message": f"Rate limit, aguardando {wait:.0f}s...", "attempt": attempt + 1})
                 if attempt < MAX_RETRIES - 1:
                     time.sleep(wait)
                     continue
                 log.error("  rate-limited, giving up after %d retries", MAX_RETRIES)
                 return AgentResult(
-                    answer="",
-                    trace=trace,
-                    iterations=iteration + 1,
+                    answer="", trace=trace, iterations=iteration + 1,
                     duration_ms=int((time.perf_counter() - t0) * 1000),
-                    prompt_tokens=prompt_tokens,
-                    completion_tokens=completion_tokens,
+                    prompt_tokens=prompt_tokens, completion_tokens=completion_tokens,
                     total_tokens=prompt_tokens + completion_tokens,
                     error=f"Rate limited at iteration {iteration + 1} after {MAX_RETRIES} retries: {e}",
                 )
@@ -137,29 +150,24 @@ def run_agent(
                 if e.status_code in (401, 402, 403):
                     log.error("  auth/billing failed (HTTP %d): %s", e.status_code, e.message)
                     return AgentResult(
-                        answer="",
-                        trace=trace,
-                        iterations=iteration + 1,
+                        answer="", trace=trace, iterations=iteration + 1,
                         duration_ms=int((time.perf_counter() - t0) * 1000),
-                        prompt_tokens=prompt_tokens,
-                        completion_tokens=completion_tokens,
+                        prompt_tokens=prompt_tokens, completion_tokens=completion_tokens,
                         total_tokens=prompt_tokens + completion_tokens,
                         error=f"Auth/billing failed (HTTP {e.status_code}): {e.message}",
                     )
                 wait = RETRY_BASE_DELAY * (2 ** attempt)
                 log.warning("  HTTP %d (attempt %d/%d), waiting %.0fs: %s",
                             e.status_code, attempt + 1, MAX_RETRIES, wait, e.message)
+                _emit(on_event, {"type": "retry", "message": f"Erro HTTP {e.status_code}, tentando novamente...", "attempt": attempt + 1})
                 if attempt < MAX_RETRIES - 1:
                     time.sleep(wait)
                     continue
                 log.error("  HTTP %d, giving up after %d retries", e.status_code, MAX_RETRIES)
                 return AgentResult(
-                    answer="",
-                    trace=trace,
-                    iterations=iteration + 1,
+                    answer="", trace=trace, iterations=iteration + 1,
                     duration_ms=int((time.perf_counter() - t0) * 1000),
-                    prompt_tokens=prompt_tokens,
-                    completion_tokens=completion_tokens,
+                    prompt_tokens=prompt_tokens, completion_tokens=completion_tokens,
                     total_tokens=prompt_tokens + completion_tokens,
                     error=f"API error (HTTP {e.status_code}) at iteration {iteration + 1}: {e.message}",
                 )
@@ -172,12 +180,9 @@ def run_agent(
                     continue
                 log.error("  giving up after %d retries: %s", MAX_RETRIES, e)
                 return AgentResult(
-                    answer="",
-                    trace=trace,
-                    iterations=iteration + 1,
+                    answer="", trace=trace, iterations=iteration + 1,
                     duration_ms=int((time.perf_counter() - t0) * 1000),
-                    prompt_tokens=prompt_tokens,
-                    completion_tokens=completion_tokens,
+                    prompt_tokens=prompt_tokens, completion_tokens=completion_tokens,
                     total_tokens=prompt_tokens + completion_tokens,
                     error=f"API error at iteration {iteration + 1}: {e}",
                 )
@@ -186,12 +191,9 @@ def run_agent(
             raw = getattr(response, "model_dump", lambda: None)()
             log.error("  empty response at iter %d: %s", iteration + 1, raw)
             return AgentResult(
-                answer="",
-                trace=trace,
-                iterations=iteration + 1,
+                answer="", trace=trace, iterations=iteration + 1,
                 duration_ms=int((time.perf_counter() - t0) * 1000),
-                prompt_tokens=prompt_tokens,
-                completion_tokens=completion_tokens,
+                prompt_tokens=prompt_tokens, completion_tokens=completion_tokens,
                 total_tokens=prompt_tokens + completion_tokens,
                 error=f"Empty response at iteration {iteration + 1}: {raw}",
             )
@@ -211,15 +213,14 @@ def run_agent(
             elapsed = int((time.perf_counter() - t0) * 1000)
             log.debug("  done in %d iterations, %dms, %d tokens",
                        iteration + 1, elapsed, prompt_tokens + completion_tokens)
-            return AgentResult(
+            result = AgentResult(
                 answer=choice.message.content or "",
-                trace=trace,
-                iterations=iteration + 1,
-                duration_ms=elapsed,
-                prompt_tokens=prompt_tokens,
-                completion_tokens=completion_tokens,
+                trace=trace, iterations=iteration + 1, duration_ms=elapsed,
+                prompt_tokens=prompt_tokens, completion_tokens=completion_tokens,
                 total_tokens=prompt_tokens + completion_tokens,
             )
+            _emit(on_event, {"type": "done"})
+            return result
 
         # Rebuild assistant message with sanitized tool call arguments
         sanitized_tool_calls = []
@@ -242,6 +243,12 @@ def run_agent(
             func_name = tc.function.name
             func_args = _parse_tool_args(tc.function.arguments)
 
+            _emit(on_event, {
+                "type": "tool_start",
+                "tool": func_name,
+                "args": func_args,
+            })
+
             try:
                 result = handlers.dispatch(func_name, func_args)
             except Exception as e:
@@ -259,6 +266,13 @@ def run_agent(
                 "result": result,
             })
 
+            _emit(on_event, {
+                "type": "tool_result",
+                "tool": func_name,
+                "args": func_args,
+                "result": result,
+            })
+
             messages.append({
                 "role": "tool",
                 "tool_call_id": tc.id,
@@ -267,12 +281,9 @@ def run_agent(
 
     log.warning("  max iterations (%d) reached", MAX_ITERATIONS)
     return AgentResult(
-        answer="",
-        trace=trace,
-        iterations=MAX_ITERATIONS,
+        answer="", trace=trace, iterations=MAX_ITERATIONS,
         duration_ms=int((time.perf_counter() - t0) * 1000),
-        prompt_tokens=prompt_tokens,
-        completion_tokens=completion_tokens,
+        prompt_tokens=prompt_tokens, completion_tokens=completion_tokens,
         total_tokens=prompt_tokens + completion_tokens,
         error="Max iterations reached",
     )
