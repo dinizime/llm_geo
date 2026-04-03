@@ -34,10 +34,8 @@ def _fetch_all(query: str, params=None, dsn: str | None = None) -> list[dict]:
 
 def init_db(dsn: str | None = None):
     with _cursor(dsn) as cur:
-        cur.execute("DROP TABLE IF EXISTS benchmark_results CASCADE")
-        cur.execute("DROP TABLE IF EXISTS benchmark_runs CASCADE")
         cur.execute("""
-            CREATE TABLE benchmark_runs (
+            CREATE TABLE IF NOT EXISTS benchmark_runs (
                 id SERIAL PRIMARY KEY,
                 run_id VARCHAR(36) UNIQUE NOT NULL,
                 model VARCHAR(200) NOT NULL,
@@ -50,7 +48,7 @@ def init_db(dsn: str | None = None):
                 pass_rate FLOAT DEFAULT 0
             );
 
-            CREATE TABLE benchmark_results (
+            CREATE TABLE IF NOT EXISTS benchmark_results (
                 id SERIAL PRIMARY KEY,
                 run_id VARCHAR(36) REFERENCES benchmark_runs(run_id),
                 query_id VARCHAR(20) NOT NULL,

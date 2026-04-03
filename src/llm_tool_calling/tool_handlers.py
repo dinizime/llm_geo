@@ -115,10 +115,20 @@ class ToolHandlers:
         )
         return {"geometry_ref": ref, "area_km2": 1234.5}
 
-    def compute_route(self, origin_lat: float, origin_lon: float,
-                      dest_lat: float, dest_lon: float) -> dict:
+    def compute_route(self, origin_ref: str, dest_ref: str) -> dict:
+        try:
+            origin = self.gs.get(origin_ref)
+        except KeyError:
+            return {"error": f"Unknown geometry_ref: {origin_ref}"}
+        try:
+            dest = self.gs.get(dest_ref)
+        except KeyError:
+            return {"error": f"Unknown geometry_ref: {dest_ref}"}
+        # Extract coordinates from point geometries
+        o_coords = origin.get("coordinates", [0, 0])
+        d_coords = dest.get("coordinates", [0, 0])
         ref = self.gs.put(
-            {"type": "LineString", "coordinates": [[origin_lon, origin_lat], [dest_lon, dest_lat]]},
+            {"type": "LineString", "coordinates": [o_coords, d_coords]},
             label="route",
         )
         return {"distance_km": 250.0, "duration_min": 180, "geometry_ref": ref}

@@ -134,19 +134,17 @@ TOOLS = [
         "function": {
             "name": "compute_route",
             "description": (
-                "Road route between two points. "
+                "Road route between two points. Accepts geometry_ref from geocode or other tools. "
                 "Returns distance_km, duration_min, geometry_ref (LineString). "
                 "Use with buffer to create a search corridor along the road."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "origin_lat": {"type": "number"},
-                    "origin_lon": {"type": "number"},
-                    "dest_lat": {"type": "number"},
-                    "dest_lon": {"type": "number"},
+                    "origin_ref": {"type": "string", "description": "geometry_ref of origin point (from geocode)"},
+                    "dest_ref": {"type": "string", "description": "geometry_ref of destination point (from geocode)"},
                 },
-                "required": ["origin_lat", "origin_lon", "dest_lat", "dest_lon"],
+                "required": ["origin_ref", "dest_ref"],
             },
         },
     },

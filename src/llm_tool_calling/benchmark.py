@@ -503,12 +503,12 @@ BENCHMARK_QUERIES: list[BenchmarkQuery] = [
     BenchmarkQuery(
         id="P03", category="Estado", difficulty="medium",
         query="Que MDS tem no RS?",
-        answer_keywords=["rs"],
+        answer_keywords=["rio grande do sul"],
     ),
     BenchmarkQuery(
         id="P04", category="Estado", difficulty="medium",
         query="Imagens de satélite de SP",
-        answer_keywords=["sp"],
+        answer_keywords=["são paulo"],
     ),
 ]
 
