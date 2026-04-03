@@ -1,0 +1,30 @@
+[project]
+name = "llm-tool-calling"
+version = "0.1.0"
+description = "Protótipo de busca espacial em linguagem natural usando LLM tool calling"
+requires-python = ">=3.11"
+dependencies = [
+    "openai>=1.30",
+    "psycopg2-binary>=2.9",
+    "python-dotenv>=1.0",
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24",
+]
+
+[project.scripts]
+benchmark = "llm_tool_calling.runner:main"
+report = "llm_tool_calling.report:main"
+
+[project.optional-dependencies]
+dev = [
+    "ruff",
+    "mypy",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
