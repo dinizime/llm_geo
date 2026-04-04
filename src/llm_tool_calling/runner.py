@@ -55,6 +55,41 @@ def _extract_product_ids(trace: list[dict]) -> list[int]:
     return sorted(ids)
 
 
+def _extract_numeric(trace: list[dict]) -> dict[str, float]:
+    """Extract numeric results from spatial computation tools."""
+    values = {}
+    for step in trace:
+        result = step.get("result", {})
+        for key in ("distance_km", "area_km2", "length_km"):
+            if key in result and isinstance(result[key], (int, float)):
+                values[key] = result[key]
+    return values
+
+
+def _extract_booleans(trace: list[dict]) -> dict[str, bool]:
+    """Extract boolean results from spatial predicate tools."""
+    values = {}
+    for step in trace:
+        result = step.get("result", {})
+        if "intersects" in result:
+            values["intersects"] = result["intersects"]
+        if "contains" in result:
+            values["contains"] = result["contains"]
+    return values
+
+
+def _extract_counts(trace: list[dict]) -> dict[str, int]:
+    """Extract feature counts from count_features and search_features calls."""
+    counts = {}
+    for step in trace:
+        result = step.get("result", {})
+        if step["tool"] in ("count_features", "search_features", "features_along_route"):
+            tipo = step.get("args", {}).get("tipo", "")
+            if "total" in result:
+                counts[tipo] = result["total"]
+    return counts
+
+
 def evaluate_query(bq: BenchmarkQuery, client: OpenAI, model: str, provider_config) -> dict:
     """Run a query and evaluate the RESULT, not the tool path."""
     try:
@@ -90,7 +125,37 @@ def evaluate_query(bq: BenchmarkQuery, client: OpenAI, model: str, provider_conf
 
     keywords_ok = len(keywords_missing) == 0
     products_ok = len(missing_product_ids) == 0
-    passed = keywords_ok and products_ok and result.error is None
+
+    # Check numeric expectations
+    numeric_ok = True
+    if bq.expected_numeric:
+        trace_numerics = _extract_numeric(result.trace)
+        for metric, (lo, hi) in bq.expected_numeric.items():
+            if metric in trace_numerics:
+                val = trace_numerics[metric]
+                if not (lo <= val <= hi):
+                    numeric_ok = False
+            # Not finding the metric in trace is not a hard fail (model might use different tools)
+
+    # Check boolean expectations
+    boolean_ok = True
+    if bq.expected_boolean:
+        trace_booleans = _extract_booleans(result.trace)
+        for pred, expected in bq.expected_boolean.items():
+            if pred in trace_booleans and trace_booleans[pred] != expected:
+                boolean_ok = False
+
+    # Check count expectations
+    count_ok = True
+    if bq.expected_count:
+        trace_counts = _extract_counts(result.trace)
+        for tipo, (lo, hi) in bq.expected_count.items():
+            if tipo in trace_counts:
+                val = trace_counts[tipo]
+                if not (lo <= val <= hi):
+                    count_ok = False
+
+    passed = keywords_ok and products_ok and numeric_ok and boolean_ok and count_ok and result.error is None
 
     return {
         "passed": passed,

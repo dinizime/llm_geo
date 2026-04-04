@@ -1,13 +1,15 @@
-# CLAUDE.md - Protótipo LLM Tool Calling para Busca Espacial
+# CLAUDE.md - Benchmark de Raciocínio Espacial com Tool Calling
 
 ## O que é este projeto
 
-Protótipo para validar a capacidade de modelos LLM de orquestrar buscas geoespaciais
-em linguagem natural usando tool calling nativo. Benchmark multi-modelo com 75 queries.
+Benchmark para avaliar a capacidade de LLMs de orquestrar ferramentas espaciais
+para responder perguntas geográficas em linguagem natural. Testa raciocínio multi-step
+com 26 tools e ~180 queries em 28 categorias operacionais.
 
 O objetivo final é um agente para o Geoportal do Exército Brasileiro que recebe perguntas
-como "cartas topográficas de Alecrim" ou "ortoimagens ao longo da BR-101 entre Florianópolis
-e Porto Alegre" e as resolve encadeando tools espaciais (geocode, buffer, intersect, search).
+como "quantas pontes tem na rota entre Alegrete e Rosário do Sul?", "obstáculos verticais
+num raio de 5km de Uruguaiana" ou "qual o hospital mais próximo da 8ª Brigada?" e as
+resolve encadeando tools espaciais.
 
 ## Stack
 
@@ -23,13 +25,13 @@ e Porto Alegre" e as resolve encadeando tools espaciais (geocode, buffer, inters
 ```
 Pergunta (texto) → Agent Loop (while tool_calls) → Tools simuladas → Resposta
      │                                                                    │
-     └─── benchmark.py (75 queries) ──→ runner.py ──→ PostgreSQL ──→ report.py ──→ HTML
+     └─── benchmark.py (~180 queries) ──→ runner.py ──→ PostgreSQL ──→ report.py ──→ HTML
 ```
 
 - O agent loop é um while-loop simples (~70 linhas)
 - As tools são **simuladas** — retornam dados sintéticos determinísticos
 - O GeometryStore mantém referências de geometria fora do contexto do LLM
-- O runner testa N modelos contra 75 queries e salva resultados no PostgreSQL
+- O runner testa N modelos contra ~180 queries e salva resultados no PostgreSQL
 - O report gera `reports/index.html` estático com gráficos comparativos
 
 ## Estrutura de pastas
@@ -42,18 +44,52 @@ Pergunta (texto) → Agent Loop (while tool_calls) → Tools simuladas → Respo
 │   └── index.html
 ├── src/llm_tool_calling/
 │   ├── agent.py                # Agent loop (while tool_calls)
-│   ├── tools.py                # 16 tool definitions (JSON schema)
+│   ├── tools.py                # 26 tool definitions (JSON schema)
 │   ├── tool_handlers.py        # Implementação simulada das tools
 │   ├── geometry_store.py       # Store de geometrias (refs, não GeoJSON)
 │   ├── synthetic_data.py       # Dados sintéticos determinísticos
-│   ├── benchmark.py            # 75 queries categorizadas com expectativas
+│   ├── benchmark.py            # ~180 queries categorizadas com expectativas
 │   ├── runner.py               # CLI: roda benchmark multi-modelo
 │   ├── report.py               # Gera relatório HTML com gráficos
 │   └── db.py                   # PostgreSQL CRUD para resultados
 └── tests/
-    ├── test_tool_handlers.py   # 22 testes unitários (sem rede)
+    ├── test_tool_handlers.py   # 44 testes unitários (sem rede)
     └── test_agent.py           # Testes de integração (requer OpenRouter)
 ```
+
+## 26 Tools em 5 categorias
+
+### Buscas geográficas (11)
+geocode, search_municipality, search_state, search_named_region, search_hydrography,
+search_border, search_features, search_military_installation, autocomplete_placename,
+search_road, list_municipalities_in
+
+### Operações espaciais (4)
+buffer, intersect, compute_route, check_intersection
+
+### Computação geométrica (3)
+compute_distance, compute_area, compute_length
+
+### Análise de feições (4)
+count_features, find_nearest, rank_features, features_along_route
+
+### Produtos e conceitual (4)
+search_products, rank_by_scale, rank_by_date, explain_product_type
+
+## 20 tipos de feições (search_features)
+
+| Grupo | Tipos |
+|-------|-------|
+| Transporte | ponte, tunel, estacao_ferroviaria, travessia_balsa |
+| Obstáculos verticais | torre_comunicacao, aerogerador, linha_transmissao, chamine_industrial |
+| Aviação | aeroporto, heliporto, campo_pouso |
+| Infraestrutura social | hospital, escola, posto_combustivel |
+| Hídrica | barragem, reservatorio, estacao_tratamento_agua |
+| Territorial | terra_indigena, edificacao_destaque |
+| Militar | area_treinamento |
+
+Cada feição tem **atributos** (altura_m, comprimento_m, leitos, pista_m, etc.)
+que permitem ranking e superlativos ("maior ponte", "torre mais alta").
 
 ## Convenções
 
@@ -74,7 +110,7 @@ Pergunta (texto) → Agent Loop (while tool_calls) → Tools simuladas → Respo
 # Setup
 pip install -e .
 
-# Testes unitários (sem rede, sem DB)
+# Testes unitários (sem rede, sem DB) — 44 testes
 pytest tests/test_tool_handlers.py -v
 
 # Benchmark com um modelo
@@ -84,20 +120,26 @@ python -m llm_tool_calling.runner --models google/gemma-4-27b-it
 # Benchmark comparando modelos
 python -m llm_tool_calling.runner --models google/gemma-4-27b-it qwen/qwen3-32b meta-llama/llama-4-scout
 
-# Filtrar por categoria ou dificuldade
-python -m llm_tool_calling.runner --models google/gemma-4-27b-it --category "Localização Simples"
-python -m llm_tool_calling.runner --models google/gemma-4-27b-it --difficulty easy
+# Filtrar por categoria
+python -m llm_tool_calling.runner --models google/gemma-4-27b-it --category "Planejamento de Rota"
+python -m llm_tool_calling.runner --models google/gemma-4-27b-it --category "Identificação de Obstáculos"
+python -m llm_tool_calling.runner --models google/gemma-4-27b-it --difficulty hard
 
 # Rodar queries específicas
-python -m llm_tool_calling.runner --models google/gemma-4-27b-it --ids A01 B01 C01
+python -m llm_tool_calling.runner --models google/gemma-4-27b-it --ids Q01 R01 S01 AA01
 
 # Gerar relatório HTML
 python -m llm_tool_calling.report
-# Abrir reports/index.html no browser
+
+# Interface web (requer Flask e OPENROUTER_API_KEY)
+python -m llm_tool_calling.web                          # http://localhost:5000
+python -m llm_tool_calling.web --port 8080              # porta customizada
+python -m llm_tool_calling.web --model qwen/qwen3-32b   # modelo específico
 ```
 
-## Benchmark: 75 queries em 16 categorias
+## Benchmark: ~180 queries em 28 categorias
 
+### Domínio: Busca de Produtos (82 queries, A-P)
 | Categoria | Queries | Dificuldade | Padrão principal |
 |---|---|---|---|
 | Localização Simples | A01-A10 | easy-medium | municipality/geocode → search_products |
@@ -116,3 +158,28 @@ python -m llm_tool_calling.report
 | Combinada | N01-N06 | hard | multi-step complexo |
 | Formulação Variada | O01-O05 | easy | mesma intenção, frases diferentes |
 | Estado | P01-P04 | medium | search_state → search_products |
+
+### Domínio: Raciocínio Espacial (~100 queries, Q-AB)
+| Categoria | Queries | Dificuldade | Padrão principal |
+|---|---|---|---|
+| Planejamento de Rota | Q01-Q12 | medium-hard | geocode → compute_route → features_along_route |
+| Identificação de Obstáculos | R01-R10 | medium-hard | geocode → buffer → search_features(torre/aerogerador/linha) |
+| Infraestrutura | S01-S10 | easy-hard | search_municipality → search_features/find_nearest |
+| Resposta a Desastres | T01-T08 | medium-hard | geocode → find_nearest/buffer → search_features |
+| Planejamento de Aviação | U01-U08 | medium-hard | geocode → buffer → search_features + rank_features |
+| Hidrografia e Terreno | V01-V08 | medium-hard | search_hydrography → compute_length/check_intersection |
+| Operações de Fronteira | W01-W08 | medium-hard | search_border → buffer → search_features |
+| Rodovias | X01-X08 | medium-hard | search_road → features_along_route/list_municipalities |
+| Militar Avançado | Y01-Y08 | medium-hard | search_military → compute_route → features_along_route |
+| Multi-Step Complexo | Z01-Z10 | hard | 4+ tools encadeados |
+| Atributos e Superlativos | AA01-AA10 | easy-hard | search → rank_features / compute_area |
+| Formulação Natural | AB01-AB08 | easy-medium | mesma intenção, linguagem informal |
+
+## Validação de resultados
+
+O benchmark usa 5 tipos de validação (não-exclusivos):
+- **answer_keywords**: palavras que DEVEM aparecer na resposta
+- **expected_product_ids**: IDs de produtos encontrados no trace
+- **expected_numeric**: valores numéricos dentro de um range (distância, área)
+- **expected_boolean**: predicados booleanos (intersecta, contém)
+- **expected_count**: contagem de feições dentro de um range

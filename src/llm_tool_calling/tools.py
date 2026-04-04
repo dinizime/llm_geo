@@ -1,6 +1,9 @@
 """Tool definitions (JSON schema) sent to the LLM."""
 
 TOOLS = [
+    # ═══════════════════════════════════════════════════════════════
+    # GEOGRAPHIC LOOKUPS
+    # ═══════════════════════════════════════════════════════════════
     {
         "type": "function",
         "function": {
@@ -188,9 +191,14 @@ TOOLS = [
         "function": {
             "name": "search_features",
             "description": (
-                "Search geographic features within an area. "
-                "Types: ponte, barragem, aeroporto, porto, reservatorio. "
-                "Each feature returns its own geometry_ref."
+                "Search geographic features within an area. Returns list with geometry_ref per feature. "
+                "Transport: ponte, tunel, estacao_ferroviaria, travessia_balsa. "
+                "Vertical obstacles: torre_comunicacao, aerogerador, linha_transmissao, chamine_industrial. "
+                "Aviation: aeroporto, heliporto, campo_pouso. "
+                "Social: hospital, escola, posto_combustivel. "
+                "Water: barragem, reservatorio, estacao_tratamento_agua. "
+                "Territorial: terra_indigena, edificacao_destaque. "
+                "Military: area_treinamento."
             ),
             "parameters": {
                 "type": "object",
@@ -273,7 +281,8 @@ TOOLS = [
             "name": "explain_product_type",
             "description": (
                 "Explains what a product type is. Use for conceptual questions "
-                "('difference between MDS and MDT?') or disambiguation."
+                "('difference between MDS and MDT?') or disambiguation. "
+                "Also explains: obstaculo_vertical, campo_pouso, faixa_fronteira."
             ),
             "parameters": {
                 "type": "object",
@@ -281,6 +290,206 @@ TOOLS = [
                     "tipo": {"type": "string"},
                 },
                 "required": ["tipo"],
+            },
+        },
+    },
+
+    # ═══════════════════════════════════════════════════════════════
+    # SPATIAL COMPUTATION TOOLS
+    # ═══════════════════════════════════════════════════════════════
+    {
+        "type": "function",
+        "function": {
+            "name": "compute_distance",
+            "description": (
+                "Computes the straight-line (geodesic) distance between two geometries in km. "
+                "Use when the user asks 'how far is X from Y' in straight-line terms."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "geometry_ref_a": {"type": "string", "description": "First geometry reference"},
+                    "geometry_ref_b": {"type": "string", "description": "Second geometry reference"},
+                },
+                "required": ["geometry_ref_a", "geometry_ref_b"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "compute_area",
+            "description": (
+                "Computes the area of a polygon geometry in km². "
+                "Use for 'what is the area of municipality X' or 'how big is the buffer zone'."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "geometry_ref": {"type": "string", "description": "Polygon geometry reference"},
+                },
+                "required": ["geometry_ref"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "compute_length",
+            "description": (
+                "Computes the length of a line geometry (route, river, border) in km. "
+                "Use for 'how long is the route', 'what is the length of the river'."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "geometry_ref": {"type": "string", "description": "LineString geometry reference"},
+                },
+                "required": ["geometry_ref"],
+            },
+        },
+    },
+
+    # ═══════════════════════════════════════════════════════════════
+    # FEATURE ANALYSIS TOOLS
+    # ═══════════════════════════════════════════════════════════════
+    {
+        "type": "function",
+        "function": {
+            "name": "count_features",
+            "description": (
+                "Counts geographic features of a given type within an area. "
+                "Faster than search_features when the user only needs a count. "
+                "Returns total count."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "tipo": {"type": "string", "description": "Feature type (e.g. ponte, hospital, torre_comunicacao, terra_indigena)"},
+                    "geometry_ref": {"type": "string", "description": "Search area geometry_ref"},
+                },
+                "required": ["tipo", "geometry_ref"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "find_nearest",
+            "description": (
+                "Finds the nearest feature(s) of a given type from a reference point. "
+                "Returns the N nearest features with distance_km to each. "
+                "Use for 'closest hospital', 'nearest airport', 'nearest bridge'."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "tipo": {"type": "string", "description": "Feature type to search for"},
+                    "geometry_ref": {"type": "string", "description": "Reference point/area geometry_ref"},
+                    "limit": {"type": "integer", "description": "Max results (default 3)"},
+                },
+                "required": ["tipo", "geometry_ref"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "rank_features",
+            "description": (
+                "Sorts features from the last search_features result by a numeric attribute. "
+                "Use for 'tallest tower', 'longest bridge', 'largest hospital', 'biggest terra_indigena'. "
+                "Attributes: altura_m, comprimento_m, pista_m, leitos, alunos, area_km2, capacidade_hm3, capacidade_ton."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "attribute": {"type": "string", "description": "Attribute name to sort by"},
+                    "order": {"type": "string", "enum": ["maior_primeiro", "menor_primeiro"], "description": "Sort order"},
+                },
+                "required": ["attribute", "order"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "features_along_route",
+            "description": (
+                "Lists features of a given type along a route or linear geometry. "
+                "Applies an implicit buffer (default 500m) and returns features "
+                "ordered by position along the route. "
+                "Use for 'bridges along the route', 'gas stations on the highway'."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "tipo": {"type": "string", "description": "Feature type (e.g. ponte, hospital, posto_combustivel)"},
+                    "geometry_ref": {"type": "string", "description": "LineString geometry_ref (from compute_route or search_road)"},
+                    "buffer_metros": {"type": "number", "description": "Corridor width in meters (default 500)"},
+                },
+                "required": ["tipo", "geometry_ref"],
+            },
+        },
+    },
+
+    # ═══════════════════════════════════════════════════════════════
+    # SPATIAL PREDICATE & LOOKUP TOOLS
+    # ═══════════════════════════════════════════════════════════════
+    {
+        "type": "function",
+        "function": {
+            "name": "check_intersection",
+            "description": (
+                "Checks whether two geometries intersect (boolean). "
+                "Returns intersects=true/false. "
+                "Use for 'does route X pass through region Y', "
+                "'does the river cross the municipality'."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "geometry_ref_a": {"type": "string"},
+                    "geometry_ref_b": {"type": "string"},
+                },
+                "required": ["geometry_ref_a", "geometry_ref_b"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "search_road",
+            "description": (
+                "Search for a road or highway by its identifier. "
+                "Returns geometry_ref (LineString) and extensao_km. "
+                "Accepts BR/state codes: BR-101, BR-116, BR-290, RS-040."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "identificador": {"type": "string", "description": "Road identifier (e.g. 'BR-116', 'RS-040')"},
+                    "uf": {"type": "string", "description": "State to filter segment (optional)"},
+                },
+                "required": ["identificador"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_municipalities_in",
+            "description": (
+                "Lists all municipalities that intersect a given geometry. "
+                "Use for 'which municipalities does the route pass through', "
+                "'what cities are within 50km of the base'."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "geometry_ref": {"type": "string", "description": "Area or line geometry_ref"},
+                },
+                "required": ["geometry_ref"],
             },
         },
     },
