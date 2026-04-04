@@ -1,5 +1,7 @@
 """Deterministic synthetic data for testing tool calling without a real database."""
 
+import math
+
 # ═══════════════════════════════════════════════════════════════════
 # MUNICIPALITIES — keyed by (nome_lower, uf_lower)
 # ═══════════════════════════════════════════════════════════════════
@@ -668,3 +670,26 @@ AUTOCOMPLETE = {
     "uru": ["Uruguaiana, RS"],
     "cach": ["Cachoeira do Sul, RS", "Cachoeirinha, RS"],
 }
+
+
+# ═══════════════════════════════════════════════════════════════════
+# ELEVATION — deterministic synthetic elevation function
+# ═══════════════════════════════════════════════════════════════════
+
+def compute_elevation(lat: float, lon: float) -> float:
+    """Deterministic synthetic elevation for southern Brazil.
+
+    Serra Gaúcha (lat ~ -29.0, lon ~ -51.1) peaks around 800m.
+    Porto Alegre lowland ~230m, Campanha ~150m, Pelotas ~120m.
+    """
+    base = 120 + (abs(lon) - 50) * 5
+    # Serra Gaúcha gaussian peak
+    serra_lat, serra_lon = -29.0, -51.1
+    d_serra = math.sqrt((lat - serra_lat) ** 2 + (lon - serra_lon) ** 2)
+    serra = 800 * math.exp(-(d_serra ** 2) / 0.8)
+    # Lowland depression near POA/coast
+    lowland_lat = -30.0
+    d_low = abs(lat - lowland_lat)
+    lowland = -100 * math.exp(-(d_low ** 2) / 2.0) if abs(lon + 51) < 1.5 else 0
+    noise = 15 * math.sin(lat * 137.3 + lon * 251.7)
+    return round(max(10.0, min(1100.0, base + serra + lowland + noise)), 1)

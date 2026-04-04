@@ -14,7 +14,17 @@ from .synthetic_data import (
     PRODUCTS,
     ROADS,
     STATES,
+    compute_elevation,
 )
+
+_ATTR_OPS = {
+    ">": lambda a, b: a > b,
+    "<": lambda a, b: a < b,
+    ">=": lambda a, b: a >= b,
+    "<=": lambda a, b: a <= b,
+    "=": lambda a, b: a == b,
+    "in": lambda a, b: a in b,
+}
 
 
 def _fuzzy_find(query: str, data: dict) -> tuple[str, dict] | None:
@@ -37,6 +47,19 @@ def _feature_to_entry(f: dict, gs, extra: dict | None = None) -> dict:
         if k not in ("nome", "geometry"):
             entry[k] = v
     return entry
+
+
+def _format_product(p: dict) -> dict:
+    """Build a result entry from a raw product dict."""
+    return {
+        "id": p["id"],
+        "tipo": p["tipo"],
+        "escala": f"1:{p['escala']:,}".replace(",", ".") if p.get("escala") else None,
+        "data_produto": p["data_produto"],
+        "articulacao": p.get("articulacao"),
+        "nome": p["nome"],
+        "resolucao_m": p.get("resolucao_m"),
+    }
 
 
 def _haversine(lon1: float, lat1: float, lon2: float, lat2: float) -> float:
@@ -154,6 +177,33 @@ class ToolHandlers:
         )
         return {"lat": v["lat"], "lon": v["lon"], "display_name": v["display_name"], "geometry_ref": ref}
 
+    def create_point(self, lat: float, lon: float, label: str = None) -> dict:
+        lbl = label or f"point_{lat}_{lon}"
+        ref = self.gs.put({"type": "Point", "coordinates": [lon, lat]}, label=lbl)
+        return {"lat": lat, "lon": lon, "geometry_ref": ref}
+
+    def reverse_geocode(self, lat: float = None, lon: float = None, geometry_ref: str = None) -> dict:
+        if geometry_ref:
+            try:
+                geom = self.gs.get(geometry_ref)
+            except KeyError:
+                return {"error": f"Unknown geometry_ref: {geometry_ref}"}
+            lon, lat = _centroid(geom)
+        if lat is None or lon is None:
+            return {"error": "Provide lat/lon or geometry_ref"}
+        for (_nome, _uf), m in MUNICIPALITIES.items():
+            m_bbox = _bbox(m["geometry"])
+            margin = 0.05
+            if (m_bbox[0] - margin <= lon <= m_bbox[2] + margin and
+                    m_bbox[1] - margin <= lat <= m_bbox[3] + margin):
+                return {
+                    "municipio": m["nome"], "uf": m["uf"],
+                    "estado": STATES.get(m["uf"].lower(), {}).get("nome", m["uf"]),
+                    "lat": lat, "lon": lon,
+                }
+        return {"municipio": None, "uf": None, "estado": None, "lat": lat, "lon": lon,
+                "note": "Coordinates outside known municipalities"}
+
     def _municipality_result(self, m: dict) -> dict:
         ref = self.gs.put(m["geometry"], label=f"municipio_{m['nome']}")
         return {"nome": m["nome"], "uf": m["uf"], "codigo_ibge": m["codigo_ibge"], "populacao": m["populacao"], "geometry_ref": ref}
@@ -197,15 +247,7 @@ class ToolHandlers:
                 continue
             if data_fim and p["data_produto"] > data_fim:
                 continue
-            results.append({
-                "id": p["id"],
-                "tipo": p["tipo"],
-                "escala": f"1:{p['escala']:,}".replace(",", ".") if p.get("escala") else None,
-                "data_produto": p["data_produto"],
-                "articulacao": p.get("articulacao"),
-                "nome": p["nome"],
-                "resolucao_m": p.get("resolucao_m"),
-            })
+            results.append(_format_product(p))
         return {"total": len(results), "products": results}
 
     def buffer(self, geometry_ref: str, raio_metros: float) -> dict:
@@ -288,7 +330,8 @@ class ToolHandlers:
         ref = self.gs.put(v["geometry"], label=f"fronteira_{v['pais']}")
         return {"pais": v["pais"], "geometry_ref": ref}
 
-    def search_features(self, tipo: str, geometry_ref: str) -> dict:
+    def search_features(self, tipo: str, geometry_ref: str, atributo: str = None,
+                        operador: str = None, valor=None) -> dict:
         key = tipo.lower().strip()
         if key in FEATURES:
             try:
@@ -300,6 +343,20 @@ class ToolHandlers:
                 if area_geom and not _bboxes_intersect(f["geometry"], area_geom):
                     continue
                 results.append(_feature_to_entry(f, self.gs))
+            # Attribute filter
+            if atributo and operador is not None and valor is not None:
+                op_fn = _ATTR_OPS.get(operador)
+                if op_fn:
+                    filtered = []
+                    for f in results:
+                        attr_val = f.get(atributo)
+                        if attr_val is not None:
+                            try:
+                                if op_fn(attr_val, valor):
+                                    filtered.append(f)
+                            except (TypeError, ValueError):
+                                pass
+                    results = filtered
             return {"total": len(results), "features": results}
         return {"total": 0, "features": []}
 
@@ -388,6 +445,23 @@ class ToolHandlers:
         intersects = _bboxes_intersect(geom_a, geom_b)
         return {"intersects": intersects}
 
+    def check_contains(self, geometry_ref_a: str, geometry_ref_b: str) -> dict:
+        try:
+            geom_a = self.gs.get(geometry_ref_a)
+            geom_b = self.gs.get(geometry_ref_b)
+        except KeyError as e:
+            return {"error": f"Unknown geometry_ref: {e}"}
+        a_bbox = _bbox(geom_a)
+        b_bbox = _bbox(geom_b)
+        margin = 0.05
+        contains = (
+            a_bbox[0] - margin <= b_bbox[0]
+            and a_bbox[1] - margin <= b_bbox[1]
+            and a_bbox[2] + margin >= b_bbox[2]
+            and a_bbox[3] + margin >= b_bbox[3]
+        )
+        return {"contains": contains}
+
     def search_road(self, identificador: str, uf: str = None) -> dict:
         key = identificador.lower().strip()
         match = _fuzzy_find(key, ROADS)
@@ -430,3 +504,119 @@ class ToolHandlers:
             results.append({"nome": m["nome"], "uf": m["uf"], "populacao": m["populacao"]})
         results.sort(key=lambda x: x["populacao"], reverse=True)
         return {"total": len(results), "municipalities": results}
+
+    def get_neighbors(self, geometry_ref: str) -> dict:
+        try:
+            geom = self.gs.get(geometry_ref)
+        except KeyError:
+            return {"error": f"Unknown geometry_ref: {geometry_ref}"}
+        my_bbox = _bbox(geom)
+        margin = 0.5
+        results = []
+        for (_nome, _uf), m in MUNICIPALITIES.items():
+            if m["geometry"] is geom:
+                continue
+            m_bbox = _bbox(m["geometry"])
+            if (my_bbox[2] + margin < m_bbox[0] or m_bbox[2] + margin < my_bbox[0]
+                    or my_bbox[3] + margin < m_bbox[1] or m_bbox[3] + margin < my_bbox[1]):
+                continue
+            results.append({"nome": m["nome"], "uf": m["uf"], "populacao": m["populacao"]})
+        results.sort(key=lambda x: x["nome"])
+        return {"total": len(results), "neighbors": results}
+
+    def search_by_articulation(self, codigo: str) -> dict:
+        code = codigo.upper().strip()
+        results = []
+        for p in PRODUCTS:
+            art = p.get("articulacao")
+            if art and code in art.upper():
+                results.append(_format_product(p))
+        if not results:
+            return {"error": f"No products found for articulation '{codigo}'"}
+        return {"total": len(results), "products": results}
+
+    # ─── Elevation & terrain ───────────────────────────────────
+
+    def get_elevation(self, geometry_ref: str) -> dict:
+        try:
+            geom = self.gs.get(geometry_ref)
+        except KeyError:
+            return {"error": f"Unknown geometry_ref: {geometry_ref}"}
+        gtype = geom.get("type", "")
+        if gtype == "Point":
+            lon, lat = geom["coordinates"][0], geom["coordinates"][1]
+            return {"elevation_m": compute_elevation(lat, lon)}
+        elif gtype == "Polygon":
+            ring = geom.get("coordinates", [[]])[0]
+            if not ring:
+                return {"error": "Empty polygon"}
+            lons = [c[0] for c in ring]
+            lats = [c[1] for c in ring]
+            elevations = []
+            for i in range(5):
+                for j in range(5):
+                    slon = min(lons) + (max(lons) - min(lons)) * i / 4
+                    slat = min(lats) + (max(lats) - min(lats)) * j / 4
+                    elevations.append(compute_elevation(slat, slon))
+            return {
+                "min_elevation_m": min(elevations),
+                "max_elevation_m": max(elevations),
+                "avg_elevation_m": round(sum(elevations) / len(elevations), 1),
+            }
+        return {"error": f"Unsupported geometry type: {gtype}"}
+
+    def get_terrain_profile(self, geometry_ref: str) -> dict:
+        try:
+            geom = self.gs.get(geometry_ref)
+        except KeyError:
+            return {"error": f"Unknown geometry_ref: {geometry_ref}"}
+        if geom.get("type") != "LineString":
+            return {"error": "Geometry is not a LineString"}
+        coords = geom.get("coordinates", [])
+        if len(coords) < 2:
+            return {"error": "LineString must have at least 2 points"}
+        total_len = _line_length_km(geom)
+        num_samples = min(10, max(2, len(coords) * 3))
+        sample_points = []
+        for i in range(num_samples):
+            t = i / (num_samples - 1) if num_samples > 1 else 0
+            target_km = t * total_len
+            cum_km = 0.0
+            for j in range(len(coords) - 1):
+                seg_km = _haversine(coords[j][0], coords[j][1], coords[j + 1][0], coords[j + 1][1])
+                if cum_km + seg_km >= target_km or j == len(coords) - 2:
+                    frac = (target_km - cum_km) / seg_km if seg_km > 0 else 0
+                    frac = max(0, min(1, frac))
+                    lon = coords[j][0] + frac * (coords[j + 1][0] - coords[j][0])
+                    lat = coords[j][1] + frac * (coords[j + 1][1] - coords[j][1])
+                    sample_points.append({
+                        "distance_km": round(target_km, 1),
+                        "elevation_m": compute_elevation(lat, lon),
+                        "lat": round(lat, 4), "lon": round(lon, 4),
+                    })
+                    break
+                cum_km += seg_km
+        elevs = [p["elevation_m"] for p in sample_points]
+        total_ascent = sum(max(0, elevs[i + 1] - elevs[i]) for i in range(len(elevs) - 1))
+        total_descent = sum(max(0, elevs[i] - elevs[i + 1]) for i in range(len(elevs) - 1))
+        max_slope = 0.0
+        for i in range(len(sample_points) - 1):
+            d = sample_points[i + 1]["distance_km"] - sample_points[i]["distance_km"]
+            if d > 0:
+                slope = abs(elevs[i + 1] - elevs[i]) / (d * 1000) * 100
+                max_slope = max(max_slope, slope)
+        if max_slope > 10:
+            classification = "montanhoso"
+        elif max_slope > 4:
+            classification = "ondulado"
+        else:
+            classification = "plano"
+        return {
+            "points": sample_points,
+            "min_m": min(elevs), "max_m": max(elevs),
+            "avg_m": round(sum(elevs) / len(elevs), 1),
+            "max_slope_pct": round(max_slope, 1),
+            "total_ascent_m": round(total_ascent, 1),
+            "total_descent_m": round(total_descent, 1),
+            "classification": classification,
+        }

@@ -324,3 +324,199 @@ class TestSearchFeaturesWithAttributes:
         r = h.search_features("terra_indigena", state["geometry_ref"])
         assert r["total"] >= 2
         assert "etnia" in r["features"][0]
+
+
+# ═══════════════════════════════════════════════════════════════
+# NEW TOOLS TESTS
+# ═══════════════════════════════════════════════════════════════
+
+
+class TestCreatePoint:
+    def test_basic(self):
+        h = make_handlers()
+        r = h.create_point(lat=-29.68, lon=-53.81)
+        assert "geometry_ref" in r
+        assert r["lat"] == -29.68
+        assert r["lon"] == -53.81
+
+    def test_with_label(self):
+        h = make_handlers()
+        r = h.create_point(lat=-29.68, lon=-53.81, label="meu ponto")
+        assert "geometry_ref" in r
+
+    def test_usable_in_buffer(self):
+        h = make_handlers()
+        pt = h.create_point(lat=-29.68, lon=-53.81)
+        buf = h.buffer(pt["geometry_ref"], 5000)
+        assert "geometry_ref" in buf
+
+
+class TestReverseGeocode:
+    def test_by_coords(self):
+        h = make_handlers()
+        r = h.reverse_geocode(lat=-29.68, lon=-53.81)
+        assert r["municipio"] == "Santa Maria"
+        assert r["uf"] == "RS"
+
+    def test_by_geometry_ref(self):
+        h = make_handlers()
+        pt = h.geocode("Santa Maria")
+        r = h.reverse_geocode(geometry_ref=pt["geometry_ref"])
+        assert r["municipio"] == "Santa Maria"
+
+    def test_outside(self):
+        h = make_handlers()
+        r = h.reverse_geocode(lat=0, lon=0)
+        assert r["municipio"] is None
+
+
+class TestCheckContains:
+    def test_point_in_municipality(self):
+        h = make_handlers()
+        pt = h.geocode("Santa Maria")
+        mun = h.search_municipality("Santa Maria", "RS")
+        r = h.check_contains(mun["geometry_ref"], pt["geometry_ref"])
+        assert r["contains"] is True
+
+    def test_point_outside(self):
+        h = make_handlers()
+        pt = h.geocode("Porto Alegre")
+        mun = h.search_municipality("Alegrete", "RS")
+        r = h.check_contains(mun["geometry_ref"], pt["geometry_ref"])
+        assert r["contains"] is False
+
+    def test_municipality_in_state(self):
+        h = make_handlers()
+        mun = h.search_municipality("Porto Alegre", "RS")
+        state = h.search_state("RS")
+        r = h.check_contains(state["geometry_ref"], mun["geometry_ref"])
+        assert r["contains"] is True
+
+
+class TestGetNeighbors:
+    def test_has_neighbors(self):
+        h = make_handlers()
+        mun = h.search_municipality("Santa Maria", "RS")
+        r = h.get_neighbors(mun["geometry_ref"])
+        assert r["total"] > 0
+
+    def test_excludes_self(self):
+        h = make_handlers()
+        mun = h.search_municipality("Santa Maria", "RS")
+        r = h.get_neighbors(mun["geometry_ref"])
+        names = [n["nome"] for n in r["neighbors"]]
+        assert "Santa Maria" not in names
+
+    def test_invalid_ref(self):
+        h = make_handlers()
+        r = h.get_neighbors("invalid_ref")
+        assert "error" in r
+
+
+class TestSearchByArticulation:
+    def test_exact(self):
+        h = make_handlers()
+        r = h.search_by_articulation("SH-22-V-C-IV-1")
+        assert r["total"] >= 1
+        assert any(p["id"] == 9 for p in r["products"])
+
+    def test_partial(self):
+        h = make_handlers()
+        r = h.search_by_articulation("SH-21-X-D")
+        assert r["total"] >= 2
+        ids = [p["id"] for p in r["products"]]
+        assert 1 in ids or 2 in ids or 3 in ids
+
+    def test_not_found(self):
+        h = make_handlers()
+        r = h.search_by_articulation("ZZ-99")
+        assert "error" in r
+
+
+class TestGetElevation:
+    def test_point(self):
+        h = make_handlers()
+        pt = h.geocode("Santa Maria")
+        r = h.get_elevation(pt["geometry_ref"])
+        assert "elevation_m" in r
+        assert 50 < r["elevation_m"] < 500
+
+    def test_polygon(self):
+        h = make_handlers()
+        mun = h.search_municipality("Caxias do Sul", "RS")
+        r = h.get_elevation(mun["geometry_ref"])
+        assert "min_elevation_m" in r
+        assert "max_elevation_m" in r
+        assert r["max_elevation_m"] >= r["min_elevation_m"]
+
+    def test_serra_higher(self):
+        h = make_handlers()
+        caxias = h.geocode("Caxias do Sul")
+        alegrete = h.geocode("Alegrete")
+        e_cax = h.get_elevation(caxias["geometry_ref"])
+        e_ale = h.get_elevation(alegrete["geometry_ref"])
+        assert e_cax["elevation_m"] > e_ale["elevation_m"]
+
+
+class TestGetTerrainProfile:
+    def test_route(self):
+        h = make_handlers()
+        o = h.geocode("Santa Maria")
+        d = h.geocode("Alegrete")
+        route = h.compute_route(o["geometry_ref"], d["geometry_ref"])
+        r = h.get_terrain_profile(route["geometry_ref"])
+        assert "points" in r
+        assert len(r["points"]) >= 2
+        assert "min_m" in r
+        assert "classification" in r
+
+    def test_road(self):
+        h = make_handlers()
+        road = h.search_road("BR-290")
+        r = h.get_terrain_profile(road["geometry_ref"])
+        assert r["classification"] in ("plano", "ondulado", "montanhoso")
+
+    def test_not_linestring(self):
+        h = make_handlers()
+        pt = h.geocode("Santa Maria")
+        r = h.get_terrain_profile(pt["geometry_ref"])
+        assert "error" in r
+
+    def test_aggregates(self):
+        h = make_handlers()
+        road = h.search_road("BR-290")
+        r = h.get_terrain_profile(road["geometry_ref"])
+        assert r["min_m"] <= r["avg_m"] <= r["max_m"]
+        assert r["total_ascent_m"] >= 0
+        assert r["total_descent_m"] >= 0
+
+
+class TestSearchFeaturesFiltered:
+    def test_filter_gt(self):
+        h = make_handlers()
+        state = h.search_state("RS")
+        r = h.search_features("ponte", state["geometry_ref"], atributo="capacidade_ton", operador=">", valor=50)
+        assert r["total"] > 0
+        for f in r["features"]:
+            assert f["capacidade_ton"] > 50
+
+    def test_filter_in(self):
+        h = make_handlers()
+        state = h.search_state("RS")
+        r = h.search_features("posto_combustivel", state["geometry_ref"], atributo="bandeira", operador="in", valor=["BR", "Shell"])
+        assert r["total"] > 0
+        for f in r["features"]:
+            assert f["bandeira"] in ["BR", "Shell"]
+
+    def test_no_filter(self):
+        h = make_handlers()
+        state = h.search_state("RS")
+        r1 = h.search_features("ponte", state["geometry_ref"])
+        r2 = h.search_features("ponte", state["geometry_ref"], atributo=None, operador=None, valor=None)
+        assert r1["total"] == r2["total"]
+
+    def test_filter_no_match(self):
+        h = make_handlers()
+        state = h.search_state("RS")
+        r = h.search_features("ponte", state["geometry_ref"], atributo="capacidade_ton", operador=">", valor=9999)
+        assert r["total"] == 0

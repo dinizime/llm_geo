@@ -14,6 +14,7 @@ sys.stdout.reconfigure(encoding="utf-8", line_buffering=True)
 sys.stderr.reconfigure(encoding="utf-8", line_buffering=True)
 
 from .agent import run_agent
+from .benchmark import BENCHMARK_QUERIES, get_categories
 from .providers import PROVIDERS, create_client, detect_provider, get_default_model
 
 app = Flask(__name__)
@@ -48,6 +49,13 @@ _TOOL_MESSAGES = {
         "check_intersection": lambda a: "Verificando interseção...",
         "search_road": lambda a: f'Buscando rodovia "{a.get("identificador", "")}"...',
         "list_municipalities_in": lambda a: "Listando municípios na área...",
+        "create_point": lambda a: f'Criando ponto em ({a.get("lat", "?")}, {a.get("lon", "?")})...',
+        "reverse_geocode": lambda a: f'Geocodificação reversa ({a.get("lat", "?")}, {a.get("lon", "?")})...',
+        "check_contains": lambda a: "Verificando contenção...",
+        "get_neighbors": lambda a: "Buscando municípios vizinhos...",
+        "search_by_articulation": lambda a: f'Buscando articulação "{a.get("codigo", "")}"...',
+        "get_elevation": lambda a: "Obtendo elevação...",
+        "get_terrain_profile": lambda a: "Calculando perfil de terreno...",
     },
     "tool_result": {
         "geocode": lambda a, r: f'{r.get("display_name", "?")} ({r.get("lat", "?")}, {r.get("lon", "?")})',
@@ -70,6 +78,13 @@ _TOOL_MESSAGES = {
         "check_intersection": lambda a, r: "Sim, interceptam" if r.get("intersects") else "Não interceptam",
         "search_road": lambda a, r: f'{r.get("nome", "?")} — {r.get("extensao_km", "?")} km' if "nome" in r else r.get("error", "?"),
         "list_municipalities_in": lambda a, r: f'{r.get("total", 0)} município(s)',
+        "create_point": lambda a, r: f'Ponto criado ({r.get("lat", "?")}, {r.get("lon", "?")})',
+        "reverse_geocode": lambda a, r: f'{r.get("municipio", "?")}/{r.get("uf", "?")}' if r.get("municipio") else "Fora de municípios conhecidos",
+        "check_contains": lambda a, r: "Sim, contém" if r.get("contains") else "Não contém",
+        "get_neighbors": lambda a, r: f'{r.get("total", 0)} vizinho(s)',
+        "search_by_articulation": lambda a, r: f'{r.get("total", 0)} produto(s)' if "total" in r else r.get("error", "?"),
+        "get_elevation": lambda a, r: f'{r.get("elevation_m", r.get("avg_elevation_m", "?"))}m',
+        "get_terrain_profile": lambda a, r: f'{r.get("classification", "?")} (slope máx: {r.get("max_slope_pct", "?")}%)',
     },
 }
 
@@ -199,6 +214,22 @@ def search_stream():
     })
 
 
+@app.route("/api/benchmark")
+def benchmark_queries():
+    categories = get_categories()
+    grouped = {}
+    for cat in categories:
+        grouped[cat] = []
+    for q in BENCHMARK_QUERIES:
+        grouped[q.category].append({
+            "id": q.id,
+            "query": q.query,
+            "difficulty": q.difficulty,
+            "expected_tools": q.expected_tools,
+        })
+    return jsonify({"categories": categories, "queries": grouped})
+
+
 SEARCH_HTML = r"""<!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -211,7 +242,7 @@ SEARCH_HTML = r"""<!DOCTYPE html>
 * { box-sizing: border-box; margin: 0; padding: 0; }
 body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f5f7fa; color: #1a1a2e; }
 
-.layout { display: flex; height: 100vh; }
+.layout { display: flex; height: 100vh; position: relative; }
 .panel { width: 480px; min-width: 380px; overflow-y: auto; padding: 20px; border-right: 1px solid #ddd; background: #fff; display: flex; flex-direction: column; }
 .map-container { flex: 1; position: relative; }
 #map { width: 100%; height: 100%; }
@@ -297,6 +328,40 @@ details summary { cursor: pointer; font-size: 0.85em; color: #888; padding: 4px 
     background: #fff3f3; border-left: 3px solid #d32f2f; border-radius: 6px;
     padding: 10px 14px; margin-bottom: 10px; color: #b71c1c; font-size: 0.85em;
 }
+
+/* Benchmark drawer */
+.bench-drawer {
+    position: absolute; top: 0; left: 0; width: 480px; min-width: 380px;
+    height: 100vh; background: #fff; z-index: 100;
+    display: flex; flex-direction: column; border-right: 1px solid #ddd;
+    box-shadow: 2px 0 12px rgba(0,0,0,.1);
+}
+.bench-header {
+    padding: 14px 20px; border-bottom: 1px solid #eee;
+    display: flex; justify-content: space-between; align-items: center;
+}
+.bench-header h2 { font-size: 1em; color: #37474f; margin: 0; }
+.bench-list { flex: 1; overflow-y: auto; padding: 8px 14px; }
+.bench-cat { margin-bottom: 10px; }
+.bench-cat-title {
+    font-size: 0.82em; color: #888; font-weight: 600; text-transform: uppercase;
+    letter-spacing: 0.5px; padding: 6px 0 4px; border-bottom: 1px solid #f0f0f0;
+    position: sticky; top: 0; background: #fff; z-index: 1;
+}
+.bench-query {
+    padding: 6px 10px; margin: 2px 0; border-radius: 6px; cursor: pointer;
+    font-size: 0.85em; display: flex; justify-content: space-between; align-items: center;
+    transition: background 0.15s;
+}
+.bench-query:hover { background: #f0f7f0; }
+.bench-query .qid { color: #aaa; font-size: 0.8em; font-family: monospace; min-width: 36px; }
+.bench-query .qtxt { flex: 1; margin: 0 8px; }
+.bench-diff {
+    font-size: 0.7em; padding: 1px 6px; border-radius: 8px; white-space: nowrap;
+}
+.bench-diff.easy { background: #e8f5e9; color: #2e7d32; }
+.bench-diff.medium { background: #fff3e0; color: #e65100; }
+.bench-diff.hard { background: #fce4ec; color: #c62828; }
 </style>
 </head>
 <body>
@@ -308,6 +373,7 @@ details summary { cursor: pointer; font-size: 0.85em; color: #888; padding: 4px 
             <input type="text" id="query" placeholder="Pergunte sobre geografia, infraestrutura, rotas..."
                    autofocus autocomplete="off">
             <button id="btn" onclick="doSearch()">Buscar</button>
+            <button id="bench-btn" onclick="toggleBenchmark()" title="Perguntas do benchmark" style="padding:10px 12px;background:#37474f;color:white;border:none;border-radius:8px;cursor:pointer;font-size:0.95em;white-space:nowrap;">&#9776; Benchmark</button>
         </div>
 
         <div class="feed" id="feed"></div>
@@ -335,6 +401,26 @@ details summary { cursor: pointer; font-size: 0.85em; color: #888; padding: 4px 
             </details>
         </div>
     </div>
+    <!-- Benchmark drawer -->
+    <div id="bench-drawer" class="bench-drawer" style="display:none">
+        <div class="bench-header">
+            <h2>Benchmark — 226 queries</h2>
+            <div style="display:flex;gap:8px;align-items:center">
+                <select id="bench-cat-filter" onchange="filterBenchmark()" style="padding:4px 8px;border:1px solid #ccc;border-radius:4px;font-size:0.82em;">
+                    <option value="">Todas categorias</option>
+                </select>
+                <select id="bench-diff-filter" onchange="filterBenchmark()" style="padding:4px 8px;border:1px solid #ccc;border-radius:4px;font-size:0.82em;">
+                    <option value="">Todas dificuldades</option>
+                    <option value="easy">easy</option>
+                    <option value="medium">medium</option>
+                    <option value="hard">hard</option>
+                </select>
+                <button onclick="toggleBenchmark()" style="background:none;border:none;font-size:1.3em;cursor:pointer;color:#666;" title="Fechar">&times;</button>
+            </div>
+        </div>
+        <div id="bench-list" class="bench-list"></div>
+    </div>
+
     <div class="map-container">
         <div id="map"></div>
     </div>
@@ -681,6 +767,69 @@ function esc(s) {
     const d = document.createElement('div');
     d.textContent = s || '';
     return d.innerHTML;
+}
+
+// === Benchmark drawer ===
+let benchData = null;
+const benchDrawer = document.getElementById('bench-drawer');
+
+async function toggleBenchmark() {
+    if (benchDrawer.style.display !== 'none') {
+        benchDrawer.style.display = 'none';
+        return;
+    }
+    benchDrawer.style.display = 'flex';
+    if (!benchData) {
+        document.getElementById('bench-list').innerHTML = '<div style="padding:20px;color:#999">Carregando...</div>';
+        const res = await fetch('/api/benchmark');
+        benchData = await res.json();
+        const catFilter = document.getElementById('bench-cat-filter');
+        benchData.categories.forEach(c => {
+            const opt = document.createElement('option');
+            opt.value = c; opt.textContent = c;
+            catFilter.appendChild(opt);
+        });
+    }
+    renderBenchmark();
+}
+
+function filterBenchmark() { renderBenchmark(); }
+
+function renderBenchmark() {
+    if (!benchData) return;
+    const catFilter = document.getElementById('bench-cat-filter').value;
+    const diffFilter = document.getElementById('bench-diff-filter').value;
+    const list = document.getElementById('bench-list');
+    list.innerHTML = '';
+
+    let count = 0;
+    for (const cat of benchData.categories) {
+        if (catFilter && cat !== catFilter) continue;
+        const queries = (benchData.queries[cat] || []).filter(q => !diffFilter || q.difficulty === diffFilter);
+        if (!queries.length) continue;
+
+        const section = document.createElement('div');
+        section.className = 'bench-cat';
+        section.innerHTML = `<div class="bench-cat-title">${esc(cat)} (${queries.length})</div>`;
+
+        queries.forEach(q => {
+            const row = document.createElement('div');
+            row.className = 'bench-query';
+            row.innerHTML = `<span class="qid">${esc(q.id)}</span><span class="qtxt">${esc(q.query)}</span><span class="bench-diff ${q.difficulty}">${q.difficulty}</span>`;
+            row.addEventListener('click', () => {
+                input.value = q.query;
+                benchDrawer.style.display = 'none';
+                doSearch();
+            });
+            section.appendChild(row);
+            count++;
+        });
+        list.appendChild(section);
+    }
+
+    if (!count) {
+        list.innerHTML = '<div style="padding:20px;color:#999">Nenhuma query encontrada</div>';
+    }
 }
 </script>
 </body>

@@ -1177,6 +1177,230 @@ BENCHMARK_QUERIES: list[BenchmarkQuery] = [
         expected_tools=["geocode", "compute_route", "features_along_route"],
         min_features={"ponte": 1},
     ),
+
+    # ═══════════════════════════════════════════════════════════════
+    # CATEGORY AC: Coordenadas e Geocodificação Reversa
+    # ═══════════════════════════════════════════════════════════════
+    BenchmarkQuery(
+        id="AC01", category="Coordenadas", difficulty="medium",
+        query="Carta topográfica que cobre 30°S 54°W",
+        expected_tools=["create_point", "search_products"],
+    ),
+    BenchmarkQuery(
+        id="AC02", category="Coordenadas", difficulty="medium",
+        query="Hospital mais próximo de -29.78, -55.79",
+        expected_tools=["create_point", "find_nearest"],
+        expected_feature_ids=["Alegrete"],
+    ),
+    BenchmarkQuery(
+        id="AC03", category="Coordenadas", difficulty="medium",
+        query="Que lugar é -29.68, -53.81?",
+        expected_tools=["reverse_geocode"],
+    ),
+    BenchmarkQuery(
+        id="AC04", category="Coordenadas", difficulty="medium",
+        query="A que município pertence o ponto 54°W 30°S?",
+        expected_tools=["reverse_geocode"],
+    ),
+    BenchmarkQuery(
+        id="AC05", category="Coordenadas", difficulty="hard",
+        query="Crie um ponto em -29.5, -54.0 e busque cartas topográficas num raio de 20km",
+        expected_tools=["create_point", "buffer", "search_products"],
+    ),
+    BenchmarkQuery(
+        id="AC06", category="Coordenadas", difficulty="medium",
+        query="O ponto -30.03, -51.23 está no Rio Grande do Sul?",
+        expected_tools=["create_point", "search_state", "check_contains"],
+        expected_boolean={"contains": True},
+    ),
+
+    # ═══════════════════════════════════════════════════════════════
+    # CATEGORY AD: Elevação e Terreno
+    # ═══════════════════════════════════════════════════════════════
+    BenchmarkQuery(
+        id="AD01", category="Elevação", difficulty="medium",
+        query="Qual a altitude de Alegrete?",
+        expected_tools=["geocode", "get_elevation"],
+    ),
+    BenchmarkQuery(
+        id="AD02", category="Elevação", difficulty="medium",
+        query="Elevação máxima do município de Santa Maria",
+        expected_tools=["search_municipality", "get_elevation"],
+    ),
+    BenchmarkQuery(
+        id="AD03", category="Elevação", difficulty="hard",
+        query="Qual o desnível na rota de Santa Maria a Alegrete?",
+        expected_tools=["geocode", "compute_route", "get_terrain_profile"],
+    ),
+    BenchmarkQuery(
+        id="AD04", category="Elevação", difficulty="hard",
+        query="A rota entre Porto Alegre e Caxias do Sul tem trecho com declividade acima de 5%?",
+        expected_tools=["geocode", "compute_route", "get_terrain_profile"],
+    ),
+    BenchmarkQuery(
+        id="AD05", category="Elevação", difficulty="hard",
+        query="Perfil de elevação da BR-290",
+        expected_tools=["search_road", "get_terrain_profile"],
+    ),
+    BenchmarkQuery(
+        id="AD06", category="Elevação", difficulty="medium",
+        query="Qual a elevação média da Serra Gaúcha?",
+        expected_tools=["search_named_region", "get_elevation"],
+    ),
+    BenchmarkQuery(
+        id="AD07", category="Elevação", difficulty="hard",
+        query="Compare a altitude de Porto Alegre e Caxias do Sul",
+        expected_tools=["geocode", "get_elevation"],
+    ),
+
+    # ═══════════════════════════════════════════════════════════════
+    # CATEGORY AE: Contenção Espacial
+    # ═══════════════════════════════════════════════════════════════
+    BenchmarkQuery(
+        id="AE01", category="Contenção Espacial", difficulty="medium",
+        query="A barragem do DNOS fica dentro do município de Santa Maria?",
+        expected_tools=["search_features", "search_municipality", "check_contains"],
+        expected_boolean={"contains": True},
+    ),
+    BenchmarkQuery(
+        id="AE02", category="Contenção Espacial", difficulty="medium",
+        query="O ponto -30.03, -51.23 está no RS?",
+        expected_tools=["create_point", "search_state", "check_contains"],
+        expected_boolean={"contains": True},
+    ),
+    BenchmarkQuery(
+        id="AE03", category="Contenção Espacial", difficulty="medium",
+        query="O aeroporto de Bagé fica dentro do município de Bagé?",
+        expected_tools=["search_features", "search_municipality", "check_contains"],
+        expected_boolean={"contains": True},
+    ),
+    BenchmarkQuery(
+        id="AE04", category="Contenção Espacial", difficulty="hard",
+        query="A terra indígena Guarita está no Rio Grande do Sul?",
+        expected_tools=["search_features", "search_state", "check_contains"],
+        expected_boolean={"contains": True},
+    ),
+    BenchmarkQuery(
+        id="AE05", category="Contenção Espacial", difficulty="medium",
+        query="O município de Alegrete está contido na Serra Gaúcha?",
+        expected_tools=["search_municipality", "search_named_region", "check_contains"],
+        expected_boolean={"contains": False},
+    ),
+    BenchmarkQuery(
+        id="AE06", category="Contenção Espacial", difficulty="hard",
+        query="Quais barragens ficam dentro do município de Santa Maria?",
+        expected_tools=["search_municipality", "search_features"],
+        min_features={"barragem": 1},
+    ),
+
+    # ═══════════════════════════════════════════════════════════════
+    # CATEGORY AF: Vizinhança Municipal
+    # ═══════════════════════════════════════════════════════════════
+    BenchmarkQuery(
+        id="AF01", category="Vizinhança", difficulty="medium",
+        query="Quais municípios fazem divisa com Santa Maria?",
+        expected_tools=["search_municipality", "get_neighbors"],
+    ),
+    BenchmarkQuery(
+        id="AF02", category="Vizinhança", difficulty="medium",
+        query="Vizinhos de Porto Alegre",
+        expected_tools=["search_municipality", "get_neighbors"],
+    ),
+    BenchmarkQuery(
+        id="AF03", category="Vizinhança", difficulty="hard",
+        query="Hospitais nos municípios vizinhos de Santa Maria",
+        expected_tools=["search_municipality", "get_neighbors", "search_features"],
+        min_features={"hospital": 1},
+    ),
+    BenchmarkQuery(
+        id="AF04", category="Vizinhança", difficulty="medium",
+        query="Quantos municípios fazem fronteira com Porto Alegre?",
+        expected_tools=["search_municipality", "get_neighbors"],
+    ),
+    BenchmarkQuery(
+        id="AF05", category="Vizinhança", difficulty="hard",
+        query="Vizinhos de Cachoeira do Sul que têm aeroporto",
+        expected_tools=["search_municipality", "get_neighbors", "search_features"],
+    ),
+
+    # ═══════════════════════════════════════════════════════════════
+    # CATEGORY AG: Busca por Articulação
+    # ═══════════════════════════════════════════════════════════════
+    BenchmarkQuery(
+        id="AG01", category="Articulação", difficulty="easy",
+        query="Carta da folha SH-22-V-C-IV-1",
+        expected_tools=["search_by_articulation"],
+        expected_product_ids=[9],
+    ),
+    BenchmarkQuery(
+        id="AG02", category="Articulação", difficulty="easy",
+        query="Tem carta na articulação SH-21-X-D?",
+        expected_tools=["search_by_articulation"],
+        expected_product_ids=[1, 2, 3],
+    ),
+    BenchmarkQuery(
+        id="AG03", category="Articulação", difficulty="medium",
+        query="Quais produtos existem na folha SH-22?",
+        expected_tools=["search_by_articulation"],
+        expected_product_ids=[7, 9],
+    ),
+    BenchmarkQuery(
+        id="AG04", category="Articulação", difficulty="easy",
+        query="Buscar carta topográfica pela articulação SH-21-X-D-III",
+        expected_tools=["search_by_articulation"],
+        expected_product_ids=[1, 2],
+    ),
+    BenchmarkQuery(
+        id="AG05", category="Articulação", difficulty="medium",
+        query="Qual a escala da carta SH-22-V-C-IV-1?",
+        expected_tools=["search_by_articulation"],
+        expected_product_ids=[9],
+    ),
+
+    # ═══════════════════════════════════════════════════════════════
+    # CATEGORY AH: Filtro por Atributo
+    # ═══════════════════════════════════════════════════════════════
+    BenchmarkQuery(
+        id="AH01", category="Filtro por Atributo", difficulty="hard",
+        query="Pontes com capacidade acima de 40 toneladas no RS",
+        expected_tools=["search_state", "search_features"],
+        min_features={"ponte": 1},
+    ),
+    BenchmarkQuery(
+        id="AH02", category="Filtro por Atributo", difficulty="hard",
+        query="Torres de comunicação com mais de 80m de altura no RS",
+        expected_tools=["search_state", "search_features"],
+        expected_feature_ids=["Porto Alegre Norte", "Porto Alegre Centro", "Caxias do Sul"],
+    ),
+    BenchmarkQuery(
+        id="AH03", category="Filtro por Atributo", difficulty="hard",
+        query="Hospitais com mais de 100 leitos em Santa Maria",
+        expected_tools=["search_municipality", "search_features"],
+        min_features={"hospital": 2},
+    ),
+    BenchmarkQuery(
+        id="AH04", category="Filtro por Atributo", difficulty="hard",
+        query="Aeroportos com pista maior que 2000m no RS",
+        expected_tools=["search_state", "search_features"],
+        expected_feature_ids=["Salgado Filho", "Santa Maria"],
+    ),
+    BenchmarkQuery(
+        id="AH05", category="Filtro por Atributo", difficulty="hard",
+        query="Barragens com capacidade acima de 500 hm³ no RS",
+        expected_tools=["search_state", "search_features"],
+    ),
+    BenchmarkQuery(
+        id="AH06", category="Filtro por Atributo", difficulty="medium",
+        query="Pontes com mais de 1000 metros de comprimento no RS",
+        expected_tools=["search_state", "search_features"],
+        expected_feature_ids=["São Borja", "Uruguaiana"],
+    ),
+    BenchmarkQuery(
+        id="AH07", category="Filtro por Atributo", difficulty="hard",
+        query="Aerogeradores com potência acima de 3 MW no RS",
+        expected_tools=["search_state", "search_features"],
+        min_features={"aerogerador": 1},
+    ),
 ]
 
 

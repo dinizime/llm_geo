@@ -4,7 +4,7 @@
 
 Benchmark para avaliar a capacidade de LLMs de orquestrar ferramentas espaciais
 para responder perguntas geográficas em linguagem natural. Testa raciocínio multi-step
-com 26 tools e ~180 queries em 28 categorias operacionais.
+com 27 tools e ~226 queries em 34 categorias operacionais.
 
 O objetivo final é um agente para o Geoportal do Exército Brasileiro que recebe perguntas
 como "quantas pontes tem na rota entre Alegrete e Rosário do Sul?", "obstáculos verticais
@@ -53,28 +53,31 @@ Pergunta (texto) → Agent Loop (while tool_calls) → Tools simuladas → Respo
 │   ├── report.py               # Gera relatório HTML com gráficos
 │   └── db.py                   # PostgreSQL CRUD para resultados
 └── tests/
-    ├── test_tool_handlers.py   # 44 testes unitários (sem rede)
+    ├── test_tool_handlers.py   # 68 testes unitários (sem rede)
     └── test_agent.py           # Testes de integração (requer OpenRouter)
 ```
 
-## 26 Tools em 5 categorias
+## 27 Tools em 7 categorias
 
-### Buscas geográficas (11)
-geocode, search_municipality, search_state, search_named_region, search_hydrography,
-search_border, search_features, search_military_installation, autocomplete_placename,
-search_road, list_municipalities_in
+### Buscas geográficas (13)
+geocode, create_point, reverse_geocode, search_municipality, search_state,
+search_named_region, search_hydrography, search_border, search_features,
+search_military_installation, search_road, list_municipalities_in, get_neighbors
 
-### Operações espaciais (4)
-buffer, intersect, compute_route, check_intersection
+### Operações espaciais (5)
+buffer, intersect, compute_route, check_intersection, check_contains
 
 ### Computação geométrica (3)
 compute_distance, compute_area, compute_length
 
-### Análise de feições (4)
-count_features, find_nearest, rank_features, features_along_route
+### Elevação e terreno (2)
+get_elevation, get_terrain_profile
 
-### Produtos e conceitual (4)
-search_products, rank_by_scale, rank_by_date, explain_product_type
+### Análise de feições (2)
+find_nearest, features_along_route
+
+### Produtos (2)
+search_products, search_by_articulation
 
 ## 20 tipos de feições (search_features)
 
@@ -94,7 +97,8 @@ que permitem ranking e superlativos ("maior ponte", "torre mais alta").
 ## Convenções
 
 - Código e comentários em inglês; docs e queries de exemplo em português
-- Nomes de tools em snake_case com prefixo semântico (search_, compute_, rank_)
+- Nomes de tools em snake_case com prefixo semântico (search_, compute_, get_, check_)
+- search_features aceita filtro de atributos (atributo, operador, valor) com operadores: >, <, >=, <=, =, in
 - Testes unitários (test_tool_handlers) não precisam de rede nem DB
 - Benchmark requer OPENROUTER_API_KEY e PostgreSQL rodando
 
@@ -137,7 +141,7 @@ python -m llm_tool_calling.web --port 8080              # porta customizada
 python -m llm_tool_calling.web --model qwen/qwen3-32b   # modelo específico
 ```
 
-## Benchmark: ~180 queries em 28 categorias
+## Benchmark: ~226 queries em 34 categorias
 
 ### Domínio: Busca de Produtos (82 queries, A-P)
 | Categoria | Queries | Dificuldade | Padrão principal |
@@ -174,6 +178,16 @@ python -m llm_tool_calling.web --model qwen/qwen3-32b   # modelo específico
 | Multi-Step Complexo | Z01-Z10 | hard | 4+ tools encadeados |
 | Atributos e Superlativos | AA01-AA10 | easy-hard | search → rank_features / compute_area |
 | Formulação Natural | AB01-AB08 | easy-medium | mesma intenção, linguagem informal |
+
+### Domínio: Novas Capacidades (36 queries, AC-AH)
+| Categoria | Queries | Dificuldade | Padrão principal |
+|---|---|---|---|
+| Coordenadas | AC01-AC06 | medium-hard | create_point/reverse_geocode → search/find |
+| Elevação | AD01-AD07 | medium-hard | geocode → get_elevation/get_terrain_profile |
+| Contenção Espacial | AE01-AE06 | medium-hard | search → check_contains |
+| Vizinhança | AF01-AF05 | medium-hard | search_municipality → get_neighbors |
+| Articulação | AG01-AG05 | easy-medium | search_by_articulation |
+| Filtro por Atributo | AH01-AH07 | medium-hard | search_features com atributo/operador/valor |
 
 ## Validação de resultados
 

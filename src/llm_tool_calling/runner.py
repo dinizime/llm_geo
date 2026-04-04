@@ -67,7 +67,7 @@ def _extract_feature_names(trace: list[dict]) -> set[str]:
 def _extract_feature_counts(trace: list[dict]) -> dict[str, int]:
     counts: dict[str, int] = {}
     for step in trace:
-        if step["tool"] in ("search_features", "features_along_route"):
+        if step["tool"] in ("search_features", "features_along_route", "find_nearest"):
             tipo = step.get("args", {}).get("tipo", "")
             total = step["result"].get("total", 0)
             counts[tipo] = counts.get(tipo, 0) + total
@@ -109,12 +109,29 @@ def evaluate_query(bq: BenchmarkQuery, client: OpenAI, model: str, provider_conf
         }
 
     tools_called = [s["tool"] for s in result.trace]
+    called_set = set(tools_called)
     checks = {}
 
-    # 1. Expected tools
+    # 1. Expected tools (with equivalence for valid alternative paths)
+    # Each entry: if expected tool X is missing, accept Y as equivalent
+    TOOL_EQUIVALENCES = {
+        "geocode": ["search_municipality"],
+        "search_municipality": ["geocode"],
+        "search_features": ["find_nearest", "features_along_route"],
+        "find_nearest": ["search_features"],
+        "compute_distance": ["compute_route"],
+        "search_road": ["compute_route"],
+    }
     tools_ok = True
     if bq.expected_tools:
-        missing_tools = set(bq.expected_tools) - set(tools_called)
+        missing_tools = set()
+        for tool in bq.expected_tools:
+            if tool in called_set:
+                continue
+            alternatives = TOOL_EQUIVALENCES.get(tool, [])
+            if any(alt in called_set for alt in alternatives):
+                continue
+            missing_tools.add(tool)
         tools_ok = len(missing_tools) == 0
         if not tools_ok:
             checks["missing_tools"] = sorted(missing_tools)

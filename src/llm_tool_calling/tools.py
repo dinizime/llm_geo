@@ -28,6 +28,45 @@ TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "create_point",
+            "description": (
+                "Creates a point geometry from raw coordinates. Returns geometry_ref. "
+                "Use when the user provides explicit lat/lon coordinates instead of a place name. "
+                "Example: create_point(lat=-29.78, lon=-55.79)"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "lat": {"type": "number", "description": "Latitude (e.g. -29.78)"},
+                    "lon": {"type": "number", "description": "Longitude (e.g. -55.79)"},
+                    "label": {"type": "string", "description": "Optional label for this point"},
+                },
+                "required": ["lat", "lon"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "reverse_geocode",
+            "description": (
+                "Determines which municipality a coordinate falls in. "
+                "Accepts lat/lon directly or a geometry_ref of a Point. "
+                "Returns municipio, uf, estado."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "lat": {"type": "number", "description": "Latitude"},
+                    "lon": {"type": "number", "description": "Longitude"},
+                    "geometry_ref": {"type": "string", "description": "Point geometry_ref (alternative to lat/lon)"},
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "search_municipality",
             "description": (
                 "Returns the polygon of a Brazilian municipality (geometry_ref). "
@@ -95,6 +134,24 @@ TOOLS = [
                     "data_fim": {"type": "string", "description": "End date YYYY-MM-DD"},
                 },
                 "required": ["geometry_ref"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "search_by_articulation",
+            "description": (
+                "Search geospatial products by map sheet articulation code (MI or INOM). "
+                "Accepts codes like 'SH-22-V-C-IV-1', 'SH-21-X-D'. "
+                "Performs substring match on the articulacao field."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "codigo": {"type": "string", "description": "Articulation code (MI or INOM). E.g. 'SH-22-V-C-IV-1'"},
+                },
+                "required": ["codigo"],
             },
         },
     },
@@ -205,6 +262,9 @@ TOOLS = [
                 "properties": {
                     "tipo": {"type": "string", "description": "Feature type"},
                     "geometry_ref": {"type": "string", "description": "Search area geometry_ref"},
+                    "atributo": {"type": "string", "description": "Attribute to filter on (e.g. 'capacidade_ton', 'altura_m', 'leitos', 'pista_m', 'potencia_mw')"},
+                    "operador": {"type": "string", "description": "Comparison operator: '>', '<', '>=', '<=', '=', 'in'"},
+                    "valor": {"description": "Value to compare (number/string for scalar ops, list for 'in')"},
                 },
                 "required": ["tipo", "geometry_ref"],
             },
@@ -357,6 +417,26 @@ TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "check_contains",
+            "description": (
+                "Checks whether geometry A fully contains geometry B. "
+                "Returns contains=true/false. "
+                "Use for 'is point X inside municipality Y', "
+                "'does the state contain this region'."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "geometry_ref_a": {"type": "string", "description": "Container geometry"},
+                    "geometry_ref_b": {"type": "string", "description": "Candidate geometry (must be inside A)"},
+                },
+                "required": ["geometry_ref_a", "geometry_ref_b"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "search_road",
             "description": (
                 "Search for a road or highway by its identifier. "
@@ -386,6 +466,66 @@ TOOLS = [
                 "type": "object",
                 "properties": {
                     "geometry_ref": {"type": "string", "description": "Area or line geometry_ref"},
+                },
+                "required": ["geometry_ref"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_neighbors",
+            "description": (
+                "Returns municipalities that border the given municipality. "
+                "Use for 'which municipalities border Alegrete', 'neighbors of Santa Maria'."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "geometry_ref": {"type": "string", "description": "geometry_ref of a municipality polygon"},
+                },
+                "required": ["geometry_ref"],
+            },
+        },
+    },
+
+    # ═══════════════════════════════════════════════════════════════
+    # ELEVATION & TERRAIN TOOLS
+    # ═══════════════════════════════════════════════════════════════
+    {
+        "type": "function",
+        "function": {
+            "name": "get_elevation",
+            "description": (
+                "Returns the elevation of a point or the elevation range of a polygon area. "
+                "For Point: returns elevation_m. "
+                "For Polygon: returns min_elevation_m, max_elevation_m, avg_elevation_m."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "geometry_ref": {"type": "string", "description": "Point or Polygon geometry_ref"},
+                },
+                "required": ["geometry_ref"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_terrain_profile",
+            "description": (
+                "Returns the elevation profile along a LineString (route, road, or river). "
+                "Samples ~10 points along the line. Returns point-by-point data "
+                "(distance_km, elevation_m, lat, lon) plus aggregates: min_m, max_m, avg_m, "
+                "max_slope_pct, total_ascent_m, total_descent_m, and terrain classification "
+                "(plano/ondulado/montanhoso). "
+                "Use for elevation profile, slope analysis, and terrain assessment."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "geometry_ref": {"type": "string", "description": "LineString geometry_ref (from compute_route, search_road, or search_hydrography)"},
                 },
                 "required": ["geometry_ref"],
             },
