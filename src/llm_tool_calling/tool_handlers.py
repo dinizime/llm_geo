@@ -51,7 +51,7 @@ def _feature_to_entry(f: dict, gs, extra: dict | None = None) -> dict:
 
 def _format_product(p: dict) -> dict:
     """Build a result entry from a raw product dict."""
-    return {
+    result = {
         "id": p["id"],
         "tipo": p["tipo"],
         "escala": f"1:{p['escala']:,}".replace(",", ".") if p.get("escala") else None,
@@ -60,6 +60,9 @@ def _format_product(p: dict) -> dict:
         "nome": p["nome"],
         "resolucao_m": p.get("resolucao_m"),
     }
+    if p.get("bbox"):
+        result["bbox"] = p["bbox"]
+    return result
 
 
 def _haversine(lon1: float, lat1: float, lon2: float, lat2: float) -> float:
@@ -256,22 +259,16 @@ class ToolHandlers:
         except KeyError:
             return {"error": f"Unknown geometry_ref: {geometry_ref}"}
         raio_metros = max(1.0, float(raio_metros))
-        min_lon, min_lat, max_lon, max_lat = _bbox(geom)
-        if min_lon == max_lon and min_lat == max_lat:
-            # Point geometry — use centroid
-            min_lon, min_lat = _centroid(geom)
-            max_lon, max_lat = min_lon, min_lat
-        center_lat = (min_lat + max_lat) / 2
+        cx, cy = _centroid(geom)
         delta_lat = raio_metros / 110574.0
-        delta_lon = raio_metros / (111320.0 * max(0.01, abs(math.cos(math.radians(center_lat)))))
-        buffered = {
-            "type": "Polygon",
-            "coordinates": [[[min_lon - delta_lon, min_lat - delta_lat],
-                             [max_lon + delta_lon, min_lat - delta_lat],
-                             [max_lon + delta_lon, max_lat + delta_lat],
-                             [min_lon - delta_lon, max_lat + delta_lat],
-                             [min_lon - delta_lon, min_lat - delta_lat]]],
-        }
+        delta_lon = raio_metros / (111320.0 * max(0.01, abs(math.cos(math.radians(cy)))))
+        # Approximate circle with 64 vertices
+        n_pts = 64
+        ring = []
+        for i in range(n_pts + 1):
+            angle = 2 * math.pi * (i % n_pts) / n_pts
+            ring.append([cx + delta_lon * math.cos(angle), cy + delta_lat * math.sin(angle)])
+        buffered = {"type": "Polygon", "coordinates": [ring]}
         ref = self.gs.put(buffered, label=f"buffer_{raio_metros}m")
         return {"geometry_ref": ref, "type": "Polygon", "description": f"Buffer de {raio_metros}m aplicado"}
 

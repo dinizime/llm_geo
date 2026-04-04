@@ -185,8 +185,25 @@ def evaluate_query(bq: BenchmarkQuery, client: OpenAI, model: str, provider_conf
                 boolean_ok = False
                 checks[f"bool_{pred}"] = f"expected {expected}, got {trace_bools[pred]}"
 
+    # 7. Answer keywords (case-insensitive substring match)
+    keywords_ok = True
+    if bq.answer_keywords:
+        answer_lower = result.answer.lower()
+        missing_kw = [kw for kw in bq.answer_keywords if kw.lower() not in answer_lower]
+        keywords_ok = len(missing_kw) == 0
+        if not keywords_ok:
+            checks["missing_keywords"] = missing_kw
+
+    # 8. Reject (out-of-scope / prompt injection): no tools should be called
+    reject_ok = True
+    if bq.reject:
+        if tools_called:
+            reject_ok = False
+            checks["reject_violated"] = f"expected no tools, got {tools_called}"
+
     passed = (tools_ok and products_ok and features_ok and min_feat_ok
-              and numeric_ok and boolean_ok and result.error is None)
+              and numeric_ok and boolean_ok and keywords_ok and reject_ok
+              and result.error is None)
 
     return {
         "passed": passed,

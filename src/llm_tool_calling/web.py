@@ -153,7 +153,12 @@ def search_stream():
                         pid = p.get("id")
                         if pid and pid not in seen:
                             seen.add(pid)
-                            products.append(p)
+                            p_copy = dict(p)
+                            bbox = p.get("bbox")
+                            if bbox and len(bbox) == 4:
+                                x0, y0, x1, y1 = bbox
+                                p_copy["_geometry"] = {"type": "Polygon", "coordinates": [[[x0, y0], [x1, y0], [x1, y1], [x0, y1], [x0, y0]]]}
+                            products.append(p_copy)
 
             # Extract all features from trace with geometry for map
             gs = result._geometry_store
@@ -281,8 +286,14 @@ h1 { font-size: 1.2em; margin-bottom: 16px; color: #1a5632; }
 .answer-box {
     background: #f8faf8; border-radius: 8px; padding: 12px 14px;
     border-left: 3px solid #1a5632; line-height: 1.55; font-size: 0.9em;
-    white-space: pre-wrap; word-wrap: break-word;
+    word-wrap: break-word;
 }
+.answer-box p { margin: 0 0 8px 0; }
+.answer-box p:last-child { margin-bottom: 0; }
+.answer-box ul { margin: 4px 0 8px 20px; padding: 0; }
+.answer-box li { margin: 2px 0; }
+.answer-box code { background: #e8e8e8; padding: 1px 4px; border-radius: 3px; font-size: 0.9em; }
+.answer-box strong { color: #1a1a2e; }
 
 /* Thoughts */
 .thought-block {
@@ -456,6 +467,7 @@ function clearMap() {
         if (map.getSource(id)) map.removeSource(id);
     });
     mapSources = [];
+    _srcCounter = 0;
 }
 
 const FEATURE_COLORS = {
@@ -464,7 +476,12 @@ const FEATURE_COLORS = {
     campo_pouso: '#4527a0', posto_combustivel: '#2e7d32', barragem: '#01579b',
     estacao_ferroviaria: '#4e342e', terra_indigena: '#33691e', edificacao_destaque: '#37474f',
     geocode: '#1a5632', route: '#1565c0', road: '#e65100',
+    product: '#6a1b9a', buffer: '#ff9800', intersect: '#9c27b0',
+    municipality: '#2e7d32', state: '#1b5e20', region: '#558b2f', military: '#b71c1c',
+    river: '#01579b', border: '#f44336',
 };
+
+let _srcCounter = 0;
 
 function addToMap(geojsonFeatures) {
     if (!geojsonFeatures || !geojsonFeatures.length) return;
@@ -472,10 +489,11 @@ function addToMap(geojsonFeatures) {
     const bounds = new maplibregl.LngLatBounds();
     let hasPoints = false;
 
-    geojsonFeatures.forEach((feat, i) => {
+    geojsonFeatures.forEach((feat) => {
         const props = feat.properties || {};
         const geomType = feat.geometry?.type;
         const color = FEATURE_COLORS[props.type] || '#666';
+        const uid = _srcCounter++;
 
         if (geomType === 'Point') {
             const [lng, lat] = feat.geometry.coordinates;
@@ -493,7 +511,7 @@ function addToMap(geojsonFeatures) {
             mapMarkers.push(marker);
 
         } else if (geomType === 'LineString') {
-            const srcId = 'line-' + i;
+            const srcId = 'line-' + uid;
             map.addSource(srcId, {type: 'geojson', data: feat});
             map.addLayer({
                 id: srcId, type: 'line', source: srcId,
@@ -504,7 +522,7 @@ function addToMap(geojsonFeatures) {
             hasPoints = true;
 
         } else if (geomType === 'Polygon') {
-            const srcId = 'poly-' + i;
+            const srcId = 'poly-' + uid;
             map.addSource(srcId, {type: 'geojson', data: feat});
             map.addLayer({
                 id: srcId, type: 'fill', source: srcId,
@@ -595,11 +613,55 @@ function finishLastSpinner(msg, mapFeatures) {
     }
 }
 
-function formatAnswer(text) {
-    // Replace <thought>...</thought> with collapsible blocks
-    return text.replace(/<thought>([\s\S]*?)<\/thought>/gi, (_, content) => {
-        return `<details class="thought-block"><summary>Raciocínio do modelo</summary><div class="thought-content">${esc(content.trim())}</div></details>`;
+function formatThinking(text) {
+    // If text contains <thought> tags, extract visible part and collapse thought
+    const hasThought = /<thought>([\s\S]*?)<\/thought>/gi.test(text);
+    if (!hasThought) return esc(text);
+    // Text outside <thought> tags is the visible reasoning
+    const visible = text.replace(/<thought>[\s\S]*?<\/thought>/gi, '').trim();
+    const thoughts = [];
+    text.replace(/<thought>([\s\S]*?)<\/thought>/gi, (_, content) => {
+        thoughts.push(content.trim());
     });
+    let html = visible ? esc(visible) : '';
+    for (const t of thoughts) {
+        html += `<details class="thought-block"><summary>Raciocínio interno</summary><div class="thought-content">${esc(t)}</div></details>`;
+    }
+    return html || esc(text);
+}
+
+function renderMarkdown(text) {
+    // Escape HTML first, then apply markdown transforms
+    let html = esc(text);
+    // Bold: **text**
+    html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+    // Italic: *text*  (but not inside <strong>)
+    html = html.replace(/(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)/g, '<em>$1</em>');
+    // Inline code: `code`
+    html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
+    // Unordered lists: lines starting with - or *
+    html = html.replace(/^([*\-]) (.+)$/gm, '<li>$2</li>');
+    html = html.replace(/((?:<li>.*<\/li>\n?)+)/g, '<ul>$1</ul>');
+    // Ordered lists: lines starting with 1. 2. etc.
+    html = html.replace(/^\d+\. (.+)$/gm, '<li>$1</li>');
+    html = html.replace(/((?:<li>.*<\/li>\n?)+)/g, (m) => m.includes('<ul>') ? m : `<ul>${m}</ul>`);
+    // Line breaks: double newline = paragraph break
+    html = html.replace(/\n\n/g, '</p><p>');
+    html = html.replace(/\n/g, '<br>');
+    html = `<p>${html}</p>`;
+    // Clean up empty paragraphs
+    html = html.replace(/<p>\s*<\/p>/g, '');
+    return html;
+}
+
+function formatAnswer(text) {
+    // Extract and replace <thought>...</thought> with collapsible blocks
+    let thoughts = '';
+    let clean = text.replace(/<thought>([\s\S]*?)<\/thought>/gi, (_, content) => {
+        thoughts += `<details class="thought-block"><summary>Raciocínio do modelo</summary><div class="thought-content">${esc(content.trim())}</div></details>`;
+        return '';
+    });
+    return thoughts + renderMarkdown(clean.trim());
 }
 
 async function doSearch() {
@@ -645,7 +707,7 @@ function handleEvent(ev) {
     switch (ev.type) {
         case 'thinking':
             finishLastSpinner();
-            addFeedItem(esc(ev.message), SVG_SPINNER);
+            addFeedItem(formatThinking(ev.message), SVG_SPINNER);
             break;
         case 'tool_start':
             finishLastSpinner();
@@ -740,15 +802,36 @@ function renderResults(data) {
     document.getElementById('product-count').textContent = prods.length;
     if (prods.length) {
         prodSection.style.display = 'block';
-        prodList.innerHTML = prods.map(p => {
+        prodList.innerHTML = '';
+        prods.forEach((p, i) => {
             const tipo = (p.tipo || '').replace('_', ' ');
             const meta = [p.escala, p.data_produto, p.resolucao_m ? `${p.resolucao_m}m` : null, p.articulacao].filter(Boolean).join(' | ');
-            return `<div class="result-card">
-                <div><span class="name">${esc(p.nome || '?')}</span>
+            const hasGeo = !!p._geometry;
+            const card = document.createElement('div');
+            card.className = 'result-card';
+            card.innerHTML = `<div><span class="name">${esc(p.nome || '?')}</span>
                 ${meta ? `<div class="meta">${esc(meta)}</div>` : ''}</div>
-                <span class="badge">${esc(tipo)}</span>
-            </div>`;
-        }).join('');
+                <div style="display:flex;align-items:center;gap:6px">
+                    ${hasGeo ? `<button class="map-btn" title="Ver no mapa">${SVG_PIN}</button>` : ''}
+                    <span class="badge">${esc(tipo)}</span>
+                </div>`;
+            if (hasGeo) {
+                card.querySelector('.map-btn').addEventListener('click', () => {
+                    const key = 'prod_' + (p.id || i);
+                    if (loadedOnMap.has(key)) {
+                        zoomToGeometry(p._geometry);
+                        return;
+                    }
+                    loadedOnMap.add(key);
+                    addToMap([{
+                        type: 'Feature',
+                        geometry: p._geometry,
+                        properties: {name: p.nome || '', type: 'product'}
+                    }]);
+                });
+            }
+            prodList.appendChild(card);
+        });
     } else {
         prodSection.style.display = 'none';
     }

@@ -188,12 +188,14 @@ python -m llm_tool_calling.web --model qwen/qwen3-32b   # modelo específico
 | Vizinhança | AF01-AF05 | medium-hard | search_municipality → get_neighbors |
 | Articulação | AG01-AG05 | easy-medium | search_by_articulation |
 | Filtro por Atributo | AH01-AH07 | medium-hard | search_features com atributo/operador/valor |
+| Fora do Escopo | AI01-AI05 | easy-medium | recusa sem tools (off-topic, prompt injection) |
 
 ## Validação de resultados
 
-O benchmark usa 5 tipos de validação (não-exclusivos):
+O benchmark usa 7 tipos de validação (não-exclusivos):
 - **answer_keywords**: palavras que DEVEM aparecer na resposta
 - **expected_product_ids**: IDs de produtos encontrados no trace
 - **expected_numeric**: valores numéricos dentro de um range (distância, área)
 - **expected_boolean**: predicados booleanos (intersecta, contém)
 - **expected_count**: contagem de feições dentro de um range
+- **reject**: agente NÃO deve chamar tools (fora do escopo / prompt injection)
