@@ -44,19 +44,37 @@ from .providers import (
 log = logging.getLogger(__name__)
 
 
-def _extract_product_ids(trace: list[dict]) -> list[int]:
-    """Extract all product IDs found across all search_products calls in the trace."""
+def _extract_product_ids(trace: list[dict]) -> set[int]:
     ids = set()
     for step in trace:
         if step["tool"] == "search_products":
             for p in step["result"].get("products", []):
                 if "id" in p:
                     ids.add(p["id"])
-    return sorted(ids)
+    return ids
+
+
+def _extract_feature_names(trace: list[dict]) -> set[str]:
+    names = set()
+    for step in trace:
+        if step["tool"] in ("search_features", "features_along_route", "find_nearest"):
+            for f in step["result"].get("features") or step["result"].get("nearest") or []:
+                if "nome" in f:
+                    names.add(f["nome"])
+    return names
+
+
+def _extract_feature_counts(trace: list[dict]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for step in trace:
+        if step["tool"] in ("search_features", "features_along_route"):
+            tipo = step.get("args", {}).get("tipo", "")
+            total = step["result"].get("total", 0)
+            counts[tipo] = counts.get(tipo, 0) + total
+    return counts
 
 
 def _extract_numeric(trace: list[dict]) -> dict[str, float]:
-    """Extract numeric results from spatial computation tools."""
     values = {}
     for step in trace:
         result = step.get("result", {})
@@ -67,105 +85,98 @@ def _extract_numeric(trace: list[dict]) -> dict[str, float]:
 
 
 def _extract_booleans(trace: list[dict]) -> dict[str, bool]:
-    """Extract boolean results from spatial predicate tools."""
     values = {}
     for step in trace:
         result = step.get("result", {})
-        if "intersects" in result:
-            values["intersects"] = result["intersects"]
-        if "contains" in result:
-            values["contains"] = result["contains"]
+        for key in ("intersects", "contains"):
+            if key in result:
+                values[key] = result[key]
     return values
 
 
-def _extract_counts(trace: list[dict]) -> dict[str, int]:
-    """Extract feature counts from count_features and search_features calls."""
-    counts = {}
-    for step in trace:
-        result = step.get("result", {})
-        if step["tool"] in ("count_features", "search_features", "features_along_route"):
-            tipo = step.get("args", {}).get("tipo", "")
-            if "total" in result:
-                counts[tipo] = result["total"]
-    return counts
-
-
 def evaluate_query(bq: BenchmarkQuery, client: OpenAI, model: str, provider_config) -> dict:
-    """Run a query and evaluate the RESULT, not the tool path."""
+    """Run a query and evaluate based on the trace (what the agent DID)."""
     try:
         result = run_agent(bq.query, client=client, model=model, provider_config=provider_config)
     except Exception as e:
         log.error("Agent exception on %s: %s", bq.id, e, exc_info=True)
         return {
-            "passed": False,
-            "tools_called": [],
-            "trace": [],
-            "answer": "",
-            "keywords_found": [],
-            "keywords_missing": list(bq.answer_keywords),
-            "found_product_ids": [],
-            "missing_product_ids": list(bq.expected_product_ids),
-            "iterations": 0,
-            "duration_ms": 0,
-            "prompt_tokens": 0,
-            "completion_tokens": 0,
-            "total_tokens": 0,
+            "passed": False, "tools_called": [], "trace": [], "answer": "",
+            "checks": {"error": str(e)},
+            "iterations": 0, "duration_ms": 0,
+            "prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0,
             "error": f"Agent error: {e}",
         }
 
-    answer_lower = result.answer.lower()
+    tools_called = [s["tool"] for s in result.trace]
+    checks = {}
 
-    # Check keywords in answer
-    keywords_found = [k for k in bq.answer_keywords if k.lower() in answer_lower]
-    keywords_missing = [k for k in bq.answer_keywords if k.lower() not in answer_lower]
+    # 1. Expected tools
+    tools_ok = True
+    if bq.expected_tools:
+        missing_tools = set(bq.expected_tools) - set(tools_called)
+        tools_ok = len(missing_tools) == 0
+        if not tools_ok:
+            checks["missing_tools"] = sorted(missing_tools)
 
-    # Check expected products in trace
-    found_ids = _extract_product_ids(result.trace)
-    missing_product_ids = [pid for pid in bq.expected_product_ids if pid not in found_ids]
+    # 2. Expected product IDs
+    products_ok = True
+    if bq.expected_product_ids:
+        found_ids = _extract_product_ids(result.trace)
+        missing_pids = [pid for pid in bq.expected_product_ids if pid not in found_ids]
+        products_ok = len(missing_pids) == 0
+        if not products_ok:
+            checks["missing_product_ids"] = missing_pids
 
-    keywords_ok = len(keywords_missing) == 0
-    products_ok = len(missing_product_ids) == 0
+    # 3. Expected feature names (substring match)
+    features_ok = True
+    if bq.expected_feature_ids:
+        found_names = _extract_feature_names(result.trace)
+        found_lower = {n.lower() for n in found_names}
+        missing_feats = [f for f in bq.expected_feature_ids if not any(f.lower() in n for n in found_lower)]
+        features_ok = len(missing_feats) == 0
+        if not features_ok:
+            checks["missing_features"] = missing_feats
 
-    # Check numeric expectations
+    # 4. Minimum feature counts
+    min_feat_ok = True
+    if bq.min_features:
+        feat_counts = _extract_feature_counts(result.trace)
+        for tipo, minimum in bq.min_features.items():
+            actual = feat_counts.get(tipo, 0)
+            if actual < minimum:
+                min_feat_ok = False
+                checks[f"min_{tipo}"] = f"expected>={minimum}, got {actual}"
+
+    # 5. Numeric ranges
     numeric_ok = True
     if bq.expected_numeric:
-        trace_numerics = _extract_numeric(result.trace)
+        trace_nums = _extract_numeric(result.trace)
         for metric, (lo, hi) in bq.expected_numeric.items():
-            if metric in trace_numerics:
-                val = trace_numerics[metric]
+            if metric in trace_nums:
+                val = trace_nums[metric]
                 if not (lo <= val <= hi):
                     numeric_ok = False
-            # Not finding the metric in trace is not a hard fail (model might use different tools)
+                    checks[f"numeric_{metric}"] = f"expected [{lo},{hi}], got {val}"
 
-    # Check boolean expectations
+    # 6. Boolean predicates
     boolean_ok = True
     if bq.expected_boolean:
-        trace_booleans = _extract_booleans(result.trace)
+        trace_bools = _extract_booleans(result.trace)
         for pred, expected in bq.expected_boolean.items():
-            if pred in trace_booleans and trace_booleans[pred] != expected:
+            if pred in trace_bools and trace_bools[pred] != expected:
                 boolean_ok = False
+                checks[f"bool_{pred}"] = f"expected {expected}, got {trace_bools[pred]}"
 
-    # Check count expectations
-    count_ok = True
-    if bq.expected_count:
-        trace_counts = _extract_counts(result.trace)
-        for tipo, (lo, hi) in bq.expected_count.items():
-            if tipo in trace_counts:
-                val = trace_counts[tipo]
-                if not (lo <= val <= hi):
-                    count_ok = False
-
-    passed = keywords_ok and products_ok and numeric_ok and boolean_ok and count_ok and result.error is None
+    passed = (tools_ok and products_ok and features_ok and min_feat_ok
+              and numeric_ok and boolean_ok and result.error is None)
 
     return {
         "passed": passed,
-        "tools_called": [s["tool"] for s in result.trace],
+        "tools_called": tools_called,
         "trace": result.trace,
         "answer": result.answer[:3000],
-        "keywords_found": keywords_found,
-        "keywords_missing": keywords_missing,
-        "found_product_ids": found_ids,
-        "missing_product_ids": missing_product_ids,
+        "checks": checks,
         "iterations": result.iterations,
         "duration_ms": result.duration_ms,
         "prompt_tokens": result.prompt_tokens,
@@ -228,10 +239,8 @@ def run_benchmark(
             print(f" {status:5s} ({dur:.1f}s {tok}tok {iters}it) [{tools}]", flush=True)
 
             if not r["passed"]:
-                if r["keywords_missing"]:
-                    print(f"         keywords missing: {r['keywords_missing']}", flush=True)
-                if r["missing_product_ids"]:
-                    print(f"         products missing: {r['missing_product_ids']}", flush=True)
+                for check_key, check_val in r.get("checks", {}).items():
+                    print(f"         {check_key}: {check_val}", flush=True)
                 if r["error"]:
                     print(f"         error: {r['error'][:200]}", flush=True)
 
@@ -246,12 +255,8 @@ def run_benchmark(
                 tools_called=r["tools_called"],
                 trace=json.dumps(r["trace"], ensure_ascii=False, default=str),
                 answer=r["answer"],
-                answer_keywords=bq.answer_keywords,
-                keywords_found=r["keywords_found"],
-                keywords_missing=r["keywords_missing"],
+                checks=json.dumps(r.get("checks", {}), ensure_ascii=False),
                 expected_product_ids=bq.expected_product_ids,
-                found_product_ids=r["found_product_ids"],
-                missing_product_ids=r["missing_product_ids"],
                 iterations=r["iterations"],
                 duration_ms=r["duration_ms"],
                 prompt_tokens=r["prompt_tokens"],

@@ -4,7 +4,6 @@ import math
 
 from .geometry_store import GeometryStore
 from .synthetic_data import (
-    AUTOCOMPLETE,
     BORDERS,
     FEATURES,
     GEOCODE_RESULTS,
@@ -12,7 +11,6 @@ from .synthetic_data import (
     MILITARY_INSTALLATIONS,
     MUNICIPALITIES,
     NAMED_REGIONS,
-    PRODUCT_TYPE_EXPLANATIONS,
     PRODUCTS,
     ROADS,
     STATES,
@@ -136,8 +134,6 @@ def _polygon_area_km2(geom: dict) -> float:
 class ToolHandlers:
     def __init__(self, geometry_store: GeometryStore):
         self.gs = geometry_store
-        self._last_products: list[dict] = []
-        self._last_features: list[dict] = []
 
     def dispatch(self, name: str, args: dict) -> dict:
         handler = getattr(self, name, None)
@@ -210,15 +206,14 @@ class ToolHandlers:
                 "nome": p["nome"],
                 "resolucao_m": p.get("resolucao_m"),
             })
-        self._last_products = results
         return {"total": len(results), "products": results}
 
     def buffer(self, geometry_ref: str, raio_metros: float) -> dict:
         try:
             geom = self.gs.get(geometry_ref)
         except KeyError:
-            geom = {"type": "Polygon", "coordinates": [[]]}
-        # Expand bounding box by raio_metros (works for points, lines, and polygons)
+            return {"error": f"Unknown geometry_ref: {geometry_ref}"}
+        raio_metros = max(1.0, float(raio_metros))
         min_lon, min_lat, max_lon, max_lat = _bbox(geom)
         if min_lon == max_lon and min_lat == max_lat:
             # Point geometry — use centroid
@@ -305,7 +300,6 @@ class ToolHandlers:
                 if area_geom and not _bboxes_intersect(f["geometry"], area_geom):
                     continue
                 results.append(_feature_to_entry(f, self.gs))
-            self._last_features = results
             return {"total": len(results), "features": results}
         return {"total": 0, "features": []}
 
@@ -322,30 +316,6 @@ class ToolHandlers:
                     "geometry_ref": ref,
                 }
         return {"error": f"Military installation '{nome_ou_sigla}' not found"}
-
-    def rank_by_scale(self, order: str = "best_first") -> dict:
-        products = [p for p in self._last_products if p.get("escala")]
-        reverse = order != "best_first"
-        products.sort(key=lambda p: int(p["escala"].replace("1:", "").replace(".", "")), reverse=reverse)
-        return {"products": products}
-
-    def rank_by_date(self, order: str = "newest_first") -> dict:
-        products = list(self._last_products)
-        products.sort(key=lambda p: p.get("data_produto", ""), reverse=(order == "newest_first"))
-        return {"products": products}
-
-    def autocomplete_placename(self, fragmento: str) -> dict:
-        match = _fuzzy_find(fragmento, AUTOCOMPLETE)
-        if match:
-            _, v = match
-            return {"suggestions": v}
-        return {"suggestions": []}
-
-    def explain_product_type(self, tipo: str) -> dict:
-        key = tipo.lower().strip()
-        if key in PRODUCT_TYPE_EXPLANATIONS:
-            return {"explanation": PRODUCT_TYPE_EXPLANATIONS[key]}
-        return {"error": f"Unknown product type: {tipo}"}
 
     # ─── Spatial computation & analysis ─────────────────────────
 
@@ -380,21 +350,6 @@ class ToolHandlers:
         length = _line_length_km(geom)
         return {"length_km": length}
 
-    def count_features(self, tipo: str, geometry_ref: str) -> dict:
-        key = tipo.lower().strip()
-        if key not in FEATURES:
-            return {"tipo": tipo, "total": 0}
-        try:
-            area_geom = self.gs.get(geometry_ref)
-        except KeyError:
-            area_geom = None
-        count = 0
-        for f in FEATURES[key]:
-            if area_geom and not _bboxes_intersect(f["geometry"], area_geom):
-                continue
-            count += 1
-        return {"tipo": tipo, "total": count}
-
     def find_nearest(self, tipo: str, geometry_ref: str, limit: int = 3) -> dict:
         try:
             ref_geom = self.gs.get(geometry_ref)
@@ -414,13 +369,6 @@ class ToolHandlers:
         for dist, f in candidates[:limit]:
             results.append(_feature_to_entry(f, self.gs, extra={"distance_km": round(dist, 1)}))
         return {"total": len(results), "nearest": results}
-
-    def rank_features(self, attribute: str, order: str = "maior_primeiro") -> dict:
-        features = list(self._last_features)
-        valid = [f for f in features if attribute in f and isinstance(f[attribute], (int, float))]
-        reverse = order == "maior_primeiro"
-        valid.sort(key=lambda f: f[attribute], reverse=reverse)
-        return {"attribute": attribute, "order": order, "features": valid}
 
     def features_along_route(self, tipo: str, geometry_ref: str, buffer_metros: float = 500) -> dict:
         try:

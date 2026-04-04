@@ -229,70 +229,6 @@ TOOLS = [
             },
         },
     },
-    {
-        "type": "function",
-        "function": {
-            "name": "rank_by_scale",
-            "description": "Sorts a product list by scale (best = most detailed first).",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "order": {"type": "string", "enum": ["best_first", "worst_first"]},
-                },
-                "required": ["order"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "rank_by_date",
-            "description": "Sorts a product list by date.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "order": {"type": "string", "enum": ["newest_first", "oldest_first"]},
-                },
-                "required": ["order"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "autocomplete_placename",
-            "description": (
-                "Suggests municipalities from a text fragment. "
-                "Use when name is truncated or ambiguous (e.g. 'santa', 'são j'). "
-                "Candidates sorted by population."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "fragmento": {"type": "string"},
-                },
-                "required": ["fragmento"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "explain_product_type",
-            "description": (
-                "Explains what a product type is. Use for conceptual questions "
-                "('difference between MDS and MDT?') or disambiguation. "
-                "Also explains: obstaculo_vertical, campo_pouso, faixa_fronteira."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "tipo": {"type": "string"},
-                },
-                "required": ["tipo"],
-            },
-        },
-    },
 
     # ═══════════════════════════════════════════════════════════════
     # SPATIAL COMPUTATION TOOLS
@@ -356,25 +292,6 @@ TOOLS = [
     {
         "type": "function",
         "function": {
-            "name": "count_features",
-            "description": (
-                "Counts geographic features of a given type within an area. "
-                "Faster than search_features when the user only needs a count. "
-                "Returns total count."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "tipo": {"type": "string", "description": "Feature type (e.g. ponte, hospital, torre_comunicacao, terra_indigena)"},
-                    "geometry_ref": {"type": "string", "description": "Search area geometry_ref"},
-                },
-                "required": ["tipo", "geometry_ref"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
             "name": "find_nearest",
             "description": (
                 "Finds the nearest feature(s) of a given type from a reference point. "
@@ -389,25 +306,6 @@ TOOLS = [
                     "limit": {"type": "integer", "description": "Max results (default 3)"},
                 },
                 "required": ["tipo", "geometry_ref"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "rank_features",
-            "description": (
-                "Sorts features from the last search_features result by a numeric attribute. "
-                "Use for 'tallest tower', 'longest bridge', 'largest hospital', 'biggest terra_indigena'. "
-                "Attributes: altura_m, comprimento_m, pista_m, leitos, alunos, area_km2, capacidade_hm3, capacidade_ton."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "attribute": {"type": "string", "description": "Attribute name to sort by"},
-                    "order": {"type": "string", "enum": ["maior_primeiro", "menor_primeiro"], "description": "Sort order"},
-                },
-                "required": ["attribute", "order"],
             },
         },
     },

@@ -19,51 +19,45 @@ log = logging.getLogger(__name__)
 SYSTEM_PROMPT = """\
 Você é um assistente de raciocínio espacial do Geoportal do Exército Brasileiro.
 Seu trabalho é interpretar perguntas sobre geografia brasileira em linguagem natural
-e usar as tools disponíveis para responder. Você pode:
-
-1. BUSCAR PRODUTOS geoespaciais (cartas topográficas, ortoimagens, MDS, MDT, imagens de drone/satélite)
-2. CALCULAR distâncias, áreas e comprimentos
-3. BUSCAR FEIÇÕES geográficas (pontes, hospitais, aeroportos, torres, barragens, escolas, etc.)
-4. VERIFICAR relações espaciais (intercepta, contém)
-5. ENCONTRAR o mais próximo de um tipo (hospital, aeroporto, ponte)
-6. ORDENAR feições por atributo (maior ponte, torre mais alta, maior hospital)
-7. CONSULTAR rodovias (BR-116, BR-290, RS-040)
-8. LISTAR municípios numa área
+e usar as tools disponíveis para responder.
 
 Regras gerais:
 - Sempre resolva a geometria ANTES de operar sobre ela (geocode, search_municipality, search_state, etc.)
 - O LLM nunca vê GeoJSON. Trabalhe com geometry_ref.
-- Se o topônimo é ambíguo, use autocomplete_placename.
+- search_municipality retorna populacao, codigo_ibge, uf e geometry_ref. Use para perguntas de população.
+- search_features retorna atributos das feições (altura_m, comprimento_m, leitos, pista_m, etc.).
+  Analise os resultados para responder superlativos ("maior ponte", "torre mais alta", "hospital com mais leitos").
+- Para perguntas conceituais ("o que é MDS?"), responda com seu próprio conhecimento, sem usar tools.
+- Para nomes ambíguos ("Santa Cruz"), use search_municipality — se ambíguo, ela retorna candidatos.
 
 Busca de produtos:
-- Para buscas ao longo de rotas: geocode, compute_route, buffer, search_products.
-- Para "melhor escala": search_products depois rank_by_scale.
-- Para "mais recente": search_products depois rank_by_date.
-- Para fronteiras: search_border, buffer, search_products.
+- search_products retorna escala e data. Analise os resultados para identificar "melhor escala" ou "mais recente".
+- Para fronteiras: search_border → buffer → search_products.
 
-Busca de feições e infraestrutura:
-- Para "quantos X em Y": search_municipality/search_state + count_features.
+Feições ao longo de rotas ou rodovias (IMPORTANTE):
+- Use features_along_route para buscar feições ao longo de uma rota ou rodovia.
+  Ela recebe o geometry_ref de uma LineString (de compute_route ou search_road) e o tipo de feição.
+  Exemplo: "pontes na rota entre A e B" → geocode A → geocode B → compute_route → features_along_route(tipo="ponte", geometry_ref=rota).
+  Exemplo: "postos ao longo da BR-290" → search_road("BR-290") → features_along_route(tipo="posto_combustivel", geometry_ref=rodovia).
+  NÃO use buffer + search_features manualmente para isso — use features_along_route diretamente.
+
+Busca de feições:
+- Para "quantos X em Y": search_municipality/search_state + search_features, conte os resultados.
 - Para "X mais próximo de Y": geocode + find_nearest.
-- Para "feições ao longo de rota": geocode, compute_route, features_along_route.
-- Para "maior/mais alto/mais longo": search_features depois rank_features.
 - Para verificar se geometrias se cruzam: check_intersection.
 - Para listar municípios numa área: list_municipalities_in.
 
 Rodovias:
-- Para buscar rodovia por código: search_road (BR-116, BR-290, RS-040).
-- Para feições ao longo de rodovia: search_road + features_along_route.
+- search_road busca rodovia por código (BR-116, BR-290, RS-040). Retorna geometry_ref (LineString).
 
 Obstáculos verticais (aviação):
 - Tipos: torre_comunicacao, aerogerador, linha_transmissao, chamine_industrial.
-- Para identificar obstáculos numa área: buscar cada tipo relevante.
 
 Distância, área, comprimento:
 - Distância em linha reta: compute_distance.
 - Distância por estrada: compute_route (retorna distance_km).
 - Área de polígono: compute_area.
 - Comprimento de rio/rota/fronteira: compute_length.
-
-Para perguntas conceituais (ex: "o que é MDS?"), use explain_product_type.
 """
 
 MAX_ITERATIONS = 10
@@ -81,6 +75,7 @@ class AgentResult:
     completion_tokens: int = 0
     total_tokens: int = 0
     error: str | None = None
+    _geometry_store: object = field(default=None, repr=False)
 
 
 def _parse_tool_args(raw: str) -> dict:
@@ -110,6 +105,46 @@ def _emit(on_event: Callable | None, event: dict):
             on_event(event)
         except Exception:
             pass
+
+
+def _extract_event_geometries(tool: str, args: dict, result: dict, gs) -> list[dict]:
+    """Extract GeoJSON features from a tool result for map display."""
+    features = []
+    if tool == "geocode" and "lat" in result:
+        features.append({
+            "type": "Feature",
+            "geometry": {"type": "Point", "coordinates": [result["lon"], result["lat"]]},
+            "properties": {"name": result.get("display_name", ""), "type": "geocode"},
+        })
+    elif tool in ("compute_route", "search_road", "search_hydrography", "search_border"):
+        ref = result.get("geometry_ref")
+        if ref:
+            try:
+                geom = gs.get(ref)
+                name = result.get("nome", "") or result.get("pais", "") or "Rota"
+                if tool == "compute_route":
+                    name = f"Rota ({result.get('distance_km', '?')} km)"
+                features.append({
+                    "type": "Feature", "geometry": geom,
+                    "properties": {"name": name, "type": {"compute_route": "route", "search_road": "road", "search_hydrography": "river", "search_border": "border"}[tool]},
+                })
+            except KeyError:
+                pass
+    elif tool in ("search_features", "features_along_route", "find_nearest"):
+        tipo = args.get("tipo", "feature")
+        feat_list = result.get("features") or result.get("nearest") or []
+        for f in feat_list:
+            ref = f.get("geometry_ref", "")
+            try:
+                geom = gs.get(ref)
+                props = {"name": f.get("nome", ""), "type": tipo}
+                for k in ("comprimento_m", "altura_m", "leitos", "pista_m", "distance_km", "capacidade_ton", "area_km2"):
+                    if k in f:
+                        props[k] = f[k]
+                features.append({"type": "Feature", "geometry": geom, "properties": props})
+            except KeyError:
+                pass
+    return features
 
 
 def run_agent(
@@ -177,6 +212,7 @@ def run_agent(
                     prompt_tokens=prompt_tokens, completion_tokens=completion_tokens,
                     total_tokens=prompt_tokens + completion_tokens,
                     error=f"Rate limited at iteration {iteration + 1} after {MAX_RETRIES} retries: {e}",
+                    _geometry_store=geometry_store,
                 )
             except APIStatusError as e:
                 if e.status_code in (401, 402, 403):
@@ -187,6 +223,7 @@ def run_agent(
                         prompt_tokens=prompt_tokens, completion_tokens=completion_tokens,
                         total_tokens=prompt_tokens + completion_tokens,
                         error=f"Auth/billing failed (HTTP {e.status_code}): {e.message}",
+                        _geometry_store=geometry_store,
                     )
                 wait = RETRY_BASE_DELAY * (2 ** attempt)
                 log.warning("  HTTP %d (attempt %d/%d), waiting %.0fs: %s",
@@ -202,6 +239,7 @@ def run_agent(
                     prompt_tokens=prompt_tokens, completion_tokens=completion_tokens,
                     total_tokens=prompt_tokens + completion_tokens,
                     error=f"API error (HTTP {e.status_code}) at iteration {iteration + 1}: {e.message}",
+                    _geometry_store=geometry_store,
                 )
             except Exception as e:
                 wait = RETRY_BASE_DELAY * (2 ** attempt)
@@ -217,6 +255,7 @@ def run_agent(
                     prompt_tokens=prompt_tokens, completion_tokens=completion_tokens,
                     total_tokens=prompt_tokens + completion_tokens,
                     error=f"API error at iteration {iteration + 1}: {e}",
+                    _geometry_store=geometry_store,
                 )
 
         if response is None or not response.choices:
@@ -228,6 +267,7 @@ def run_agent(
                 prompt_tokens=prompt_tokens, completion_tokens=completion_tokens,
                 total_tokens=prompt_tokens + completion_tokens,
                 error=f"Empty response at iteration {iteration + 1}: {raw}",
+                _geometry_store=geometry_store,
             )
 
         if response.usage:
@@ -250,6 +290,7 @@ def run_agent(
                 trace=trace, iterations=iteration + 1, duration_ms=elapsed,
                 prompt_tokens=prompt_tokens, completion_tokens=completion_tokens,
                 total_tokens=prompt_tokens + completion_tokens,
+                _geometry_store=geometry_store,
             )
             _emit(on_event, {"type": "done"})
             return result
@@ -298,12 +339,17 @@ def run_agent(
                 "result": result,
             })
 
-            _emit(on_event, {
+            tool_event = {
                 "type": "tool_result",
                 "tool": func_name,
                 "args": func_args,
                 "result": result,
-            })
+            }
+            # Attach map geometries for spatial tools
+            geo = _extract_event_geometries(func_name, func_args, result, geometry_store)
+            if geo:
+                tool_event["map_features"] = geo
+            _emit(on_event, tool_event)
 
             messages.append({
                 "role": "tool",
@@ -318,4 +364,5 @@ def run_agent(
         prompt_tokens=prompt_tokens, completion_tokens=completion_tokens,
         total_tokens=prompt_tokens + completion_tokens,
         error="Max iterations reached",
+        _geometry_store=geometry_store,
     )

@@ -64,12 +64,8 @@ def init_db(dsn: str | None = None):
                 answer TEXT DEFAULT '',
 
                 -- Validation details
-                answer_keywords TEXT[] NOT NULL DEFAULT '{}',
-                keywords_found TEXT[] NOT NULL DEFAULT '{}',
-                keywords_missing TEXT[] NOT NULL DEFAULT '{}',
+                checks JSONB NOT NULL DEFAULT '{}',
                 expected_product_ids INT[] NOT NULL DEFAULT '{}',
-                found_product_ids INT[] NOT NULL DEFAULT '{}',
-                missing_product_ids INT[] NOT NULL DEFAULT '{}',
 
                 -- Metrics
                 iterations INT DEFAULT 0,
@@ -108,9 +104,7 @@ def finish_run(run_id: str, finished_at, total: int, passed: int, failed: int,
 def insert_result(*, run_id: str, query_id: str, category: str, difficulty: str,
                   query_text: str, model: str, passed: bool,
                   tools_called: list[str], trace: str, answer: str,
-                  answer_keywords: list[str], keywords_found: list[str],
-                  keywords_missing: list[str], expected_product_ids: list[int],
-                  found_product_ids: list[int], missing_product_ids: list[int],
+                  checks: str, expected_product_ids: list[int],
                   iterations: int, duration_ms: int,
                   prompt_tokens: int, completion_tokens: int, total_tokens: int,
                   error: str | None, dsn: str | None = None):
@@ -118,16 +112,12 @@ def insert_result(*, run_id: str, query_id: str, category: str, difficulty: str,
         cur.execute(
             """INSERT INTO benchmark_results
                (run_id, query_id, category, difficulty, query_text, model, passed,
-                tools_called, trace, answer,
-                answer_keywords, keywords_found, keywords_missing,
-                expected_product_ids, found_product_ids, missing_product_ids,
+                tools_called, trace, answer, checks, expected_product_ids,
                 iterations, duration_ms, prompt_tokens, completion_tokens, total_tokens,
                 error)
-               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
             (run_id, query_id, category, difficulty, query_text, model, passed,
-             tools_called, trace, answer,
-             answer_keywords, keywords_found, keywords_missing,
-             expected_product_ids, found_product_ids, missing_product_ids,
+             tools_called, trace, answer, checks, expected_product_ids,
              iterations, duration_ms, prompt_tokens, completion_tokens, total_tokens,
              error),
         )

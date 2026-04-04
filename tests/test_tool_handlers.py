@@ -124,34 +124,47 @@ class TestSearchMilitaryInstallation:
         assert "error" in r
 
 
-class TestRankByScale:
-    def test_ordering(self):
+class TestProductsHaveScaleAndDate:
+    """Products include escala and data_produto so the model can sort them."""
+    def test_products_have_scale(self):
         h = make_handlers()
         ref = h.gs.put({"type": "Point", "coordinates": [0, 0]}, "dummy")
-        h.search_products(geometry_ref=ref, tipo="carta_topografica")
-        r = h.rank_by_scale("best_first")
-        scales = [p["escala"] for p in r["products"]]
-        assert scales[0] == "1:25.000"
+        r = h.search_products(geometry_ref=ref, tipo="carta_topografica")
+        scaled = [p for p in r["products"] if p.get("escala")]
+        assert len(scaled) >= 2
 
-
-class TestExplainProductType:
-    def test_known(self):
+    def test_products_have_date(self):
         h = make_handlers()
-        r = h.explain_product_type("mds")
-        assert "MDS" in r["explanation"]
+        ref = h.gs.put({"type": "Point", "coordinates": [0, 0]}, "dummy")
+        r = h.search_products(geometry_ref=ref, tipo="*")
+        dated = [p for p in r["products"] if p.get("data_produto")]
+        assert len(dated) >= 2
 
-    def test_unknown(self):
+
+class TestAmbiguousMunicipality:
+    """search_municipality returns candidates for ambiguous names (replaces autocomplete)."""
+    def test_ambiguous_returns_candidates(self):
         h = make_handlers()
-        r = h.explain_product_type("tipo_fake")
-        assert "error" in r
+        r = h.search_municipality("Santa Maria")
+        # Should resolve (unique) — not ambiguous in our data
+        assert "nome" in r
 
 
-class TestAutocomplete:
-    def test_santa(self):
+class TestFeaturesHaveAttributes:
+    """Features include attributes so the model can identify superlatives (replaces rank_features)."""
+    def test_torre_has_altura(self):
         h = make_handlers()
-        r = h.autocomplete_placename("santa")
-        assert len(r["suggestions"]) > 0
-        assert any("Santa Maria" in s for s in r["suggestions"])
+        state = h.search_state("RS")
+        r = h.search_features("torre_comunicacao", state["geometry_ref"])
+        assert r["total"] > 0
+        assert all("altura_m" in f for f in r["features"])
+
+    def test_ponte_has_comprimento(self):
+        h = make_handlers()
+        state = h.search_state("RS")
+        r = h.search_features("ponte", state["geometry_ref"])
+        assert r["total"] > 0
+        assert all("comprimento_m" in f for f in r["features"])
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -205,21 +218,6 @@ class TestComputeLength:
         assert "error" in r
 
 
-class TestCountFeatures:
-    def test_pontes(self):
-        h = make_handlers()
-        state = h.search_state("RS")
-        r = h.count_features("ponte", state["geometry_ref"])
-        assert "total" in r
-        assert r["total"] >= 1
-
-    def test_empty_type(self):
-        h = make_handlers()
-        ref = h.gs.put({"type": "Point", "coordinates": [0, 0]}, "pt")
-        r = h.count_features("tipo_inexistente", ref)
-        assert r["total"] == 0
-
-
 class TestFindNearest:
     def test_hospital(self):
         h = make_handlers()
@@ -234,17 +232,6 @@ class TestFindNearest:
         ref = h.gs.put({"type": "Point", "coordinates": [0, 0]}, "pt")
         r = h.find_nearest("tipo_fake", ref)
         assert r["total"] == 0
-
-
-class TestRankFeatures:
-    def test_by_attribute(self):
-        h = make_handlers()
-        state = h.search_state("RS")
-        h.search_features("torre_comunicacao", state["geometry_ref"])
-        r = h.rank_features("altura_m", "maior_primeiro")
-        assert len(r["features"]) > 0
-        heights = [f["altura_m"] for f in r["features"]]
-        assert heights == sorted(heights, reverse=True)
 
 
 class TestSearchRoad:

@@ -578,6 +578,7 @@ FEATURES = {
         {"nome": "Barragem Dona Francisca (Jacuí)", "geometry": {"type": "Point", "coordinates": [-53.28, -29.45]}, "altura_m": 58, "capacidade_hm3": 840.0},
         {"nome": "Barragem Itaúba (Jacuí)", "geometry": {"type": "Point", "coordinates": [-52.8, -29.35]}, "altura_m": 35, "capacidade_hm3": 520.0},
         {"nome": "Barragem do Arroio Duro (Pelotas)", "geometry": {"type": "Point", "coordinates": [-52.5, -31.6]}, "altura_m": 20, "capacidade_hm3": 90.0},
+        {"nome": "Barragem do Lomba do Sabão (Porto Alegre)", "geometry": {"type": "Point", "coordinates": [-51.12, -30.05]}, "altura_m": 18, "capacidade_hm3": 8.0},
     ],
     "reservatorio": [
         {"nome": "Reservatório Lomba do Sabão (POA)", "geometry": {"type": "Point", "coordinates": [-51.12, -30.05]}, "capacidade_hm3": 2.5},
