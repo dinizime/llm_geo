@@ -248,24 +248,44 @@ SEARCH_HTML = r"""<!DOCTYPE html>
 body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f5f7fa; color: #1a1a2e; }
 
 .layout { display: flex; height: 100vh; position: relative; }
-.panel { width: 480px; min-width: 380px; overflow-y: auto; padding: 20px; border-right: 1px solid #ddd; background: #fff; display: flex; flex-direction: column; }
+.panel { width: 520px; min-width: 380px; max-width: 55vw; overflow-y: auto; padding: 16px; border-right: 1px solid #ddd; background: #fff; display: flex; flex-direction: column; }
 .map-container { flex: 1; position: relative; }
 #map { width: 100%; height: 100%; }
 
-h1 { font-size: 1.2em; margin-bottom: 16px; color: #1a5632; }
+.panel-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+h1 { font-size: 1.1em; color: #1a5632; }
+.bench-toggle {
+    padding: 5px 10px; background: none; border: 1px solid #ccc; border-radius: 6px;
+    font-size: 0.78em; cursor: pointer; color: #555; transition: all 0.2s;
+    display: flex; align-items: center; gap: 4px;
+}
+.bench-toggle:hover { border-color: #1a5632; color: #1a5632; background: #f0f7f0; }
 
-.search-box { display: flex; gap: 8px; margin-bottom: 16px; }
+.search-box { display: flex; gap: 6px; margin-bottom: 14px; }
 .search-box input {
-    flex: 1; padding: 10px 14px; font-size: 0.95em; border: 2px solid #ddd;
+    flex: 1; padding: 9px 12px; font-size: 0.9em; border: 1.5px solid #ddd;
     border-radius: 8px; outline: none; transition: border 0.2s;
 }
 .search-box input:focus { border-color: #1a5632; }
 .search-box button {
-    padding: 10px 20px; background: #1a5632; color: white; border: none;
-    border-radius: 8px; font-size: 0.95em; cursor: pointer; white-space: nowrap;
+    padding: 8px 14px; background: #1a5632; color: white; border: none;
+    border-radius: 8px; font-size: 0.82em; cursor: pointer; white-space: nowrap;
 }
 .search-box button:hover { background: #2d7a4a; }
 .search-box button:disabled { background: #999; cursor: wait; }
+
+@media (max-width: 900px) {
+    .layout { flex-direction: column; }
+    .panel { width: 100%; max-width: 100%; height: 50vh; min-width: unset; border-right: none; border-bottom: 1px solid #ddd; }
+    .map-container { height: 50vh; }
+    .bench-drawer { width: 100% !important; min-width: unset !important; }
+}
+@media (max-width: 600px) {
+    .panel { padding: 10px; height: 55vh; }
+    h1 { font-size: 1em; }
+    .search-box input { font-size: 0.85em; padding: 8px 10px; }
+    .search-box button { padding: 8px 10px; font-size: 0.8em; }
+}
 
 /* Feed */
 .feed { margin-bottom: 12px; flex-shrink: 0; }
@@ -342,16 +362,16 @@ details summary { cursor: pointer; font-size: 0.85em; color: #888; padding: 4px 
 
 /* Benchmark drawer */
 .bench-drawer {
-    position: absolute; top: 0; left: 0; width: 480px; min-width: 380px;
+    position: absolute; top: 0; left: 0; width: 520px; min-width: 380px;
     height: 100vh; background: #fff; z-index: 100;
     display: flex; flex-direction: column; border-right: 1px solid #ddd;
     box-shadow: 2px 0 12px rgba(0,0,0,.1);
 }
 .bench-header {
-    padding: 14px 20px; border-bottom: 1px solid #eee;
+    padding: 12px 16px; border-bottom: 1px solid #eee;
     display: flex; justify-content: space-between; align-items: center;
 }
-.bench-header h2 { font-size: 1em; color: #37474f; margin: 0; }
+.bench-header h2 { font-size: 0.95em; color: #37474f; margin: 0; }
 .bench-list { flex: 1; overflow-y: auto; padding: 8px 14px; }
 .bench-cat { margin-bottom: 10px; }
 .bench-cat-title {
@@ -360,15 +380,15 @@ details summary { cursor: pointer; font-size: 0.85em; color: #888; padding: 4px 
     position: sticky; top: 0; background: #fff; z-index: 1;
 }
 .bench-query {
-    padding: 6px 10px; margin: 2px 0; border-radius: 6px; cursor: pointer;
-    font-size: 0.85em; display: flex; justify-content: space-between; align-items: center;
-    transition: background 0.15s;
+    padding: 8px 10px; margin: 2px 0; border-radius: 6px; cursor: pointer;
+    font-size: 0.84em; display: flex; align-items: flex-start; gap: 8px;
+    transition: background 0.15s; line-height: 1.4;
 }
 .bench-query:hover { background: #f0f7f0; }
-.bench-query .qid { color: #aaa; font-size: 0.8em; font-family: monospace; min-width: 36px; }
-.bench-query .qtxt { flex: 1; margin: 0 8px; }
+.bench-query .qid { color: #aaa; font-size: 0.8em; font-family: monospace; min-width: 36px; flex-shrink: 0; padding-top: 1px; }
+.bench-query .qtxt { flex: 1; word-break: break-word; }
 .bench-diff {
-    font-size: 0.7em; padding: 1px 6px; border-radius: 8px; white-space: nowrap;
+    font-size: 0.7em; padding: 1px 6px; border-radius: 8px; white-space: nowrap; flex-shrink: 0; margin-top: 1px;
 }
 .bench-diff.easy { background: #e8f5e9; color: #2e7d32; }
 .bench-diff.medium { background: #fff3e0; color: #e65100; }
@@ -378,13 +398,15 @@ details summary { cursor: pointer; font-size: 0.85em; color: #888; padding: 4px 
 <body>
 <div class="layout">
     <div class="panel">
-        <h1>Geoportal — Assistente Espacial</h1>
+        <div class="panel-header">
+            <h1>Geoportal — Assistente Espacial</h1>
+            <button class="bench-toggle" onclick="toggleBenchmark()" title="Banco de perguntas">&#9776; Banco de perguntas</button>
+        </div>
 
         <div class="search-box">
             <input type="text" id="query" placeholder="Pergunte sobre geografia, infraestrutura, rotas..."
                    autofocus autocomplete="off">
             <button id="btn" onclick="doSearch()">Buscar</button>
-            <button id="bench-btn" onclick="toggleBenchmark()" title="Perguntas do benchmark" style="padding:10px 12px;background:#37474f;color:white;border:none;border-radius:8px;cursor:pointer;font-size:0.95em;white-space:nowrap;">&#9776; Benchmark</button>
         </div>
 
         <div class="feed" id="feed"></div>
@@ -415,7 +437,7 @@ details summary { cursor: pointer; font-size: 0.85em; color: #888; padding: 4px 
     <!-- Benchmark drawer -->
     <div id="bench-drawer" class="bench-drawer" style="display:none">
         <div class="bench-header">
-            <h2>Benchmark — 226 queries</h2>
+            <h2>Banco de perguntas</h2>
             <div style="display:flex;gap:8px;align-items:center">
                 <select id="bench-cat-filter" onchange="filterBenchmark()" style="padding:4px 8px;border:1px solid #ccc;border-radius:4px;font-size:0.82em;">
                     <option value="">Todas categorias</option>

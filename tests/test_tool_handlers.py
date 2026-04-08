@@ -1,7 +1,11 @@
 """Unit tests for tool handlers (no LLM, no network)."""
 
 from llm_tool_calling.geometry_store import GeometryStore
+from llm_tool_calling import tool_handlers
 from llm_tool_calling.tool_handlers import ToolHandlers
+
+# Disable external API calls for unit tests
+tool_handlers.USE_SYNTHETIC_ONLY = True
 
 
 def make_handlers() -> ToolHandlers:
