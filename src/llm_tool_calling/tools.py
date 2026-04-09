@@ -248,7 +248,10 @@ TOOLS = [
                         "enum": FEATURE_TYPES,
                         "description": "Tipo de feição a buscar",
                     },
-                    "geometry_ref": {"type": "string", "description": "geometry_ref da área de busca (polígono de search_municipality, buffer, etc.)"},
+                    "geometry_ref": {
+                        "oneOf": [{"type": "string"}, {"type": "array", "items": {"type": "string"}}],
+                        "description": "geometry_ref da área de busca (string ou lista para busca em múltiplas áreas)",
+                    },
                     "atributo": {
                         "type": "string",
                         "description": "Atributo para filtrar (ex: 'altura_m', 'comprimento_m', 'leitos', 'pista_m', 'capacidade_ton', 'potencia_mw')",
@@ -283,8 +286,11 @@ TOOLS = [
                         "enum": FEATURE_TYPES,
                         "description": "Tipo de feição a buscar",
                     },
-                    "geometry_ref": {"type": "string", "description": "geometry_ref do ponto de referência"},
-                    "limit": {"type": "integer", "description": "Máximo de resultados (padrão 3)"},
+                    "geometry_ref": {
+                        "oneOf": [{"type": "string"}, {"type": "array", "items": {"type": "string"}}],
+                        "description": "geometry_ref do ponto de referência (string ou lista para lote)",
+                    },
+                    "limit": {"type": "integer", "description": "Máximo de resultados por ponto (padrão 3)"},
                 },
                 "required": ["tipo", "geometry_ref"],
                 "additionalProperties": False,
@@ -306,7 +312,10 @@ TOOLS = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "geometry_ref": {"type": "string", "description": "Referência da geometria central"},
+                    "geometry_ref": {
+                        "oneOf": [{"type": "string"}, {"type": "array", "items": {"type": "string"}}],
+                        "description": "Referência da geometria central (string ou lista para lote)",
+                    },
                     "raio_metros": {"type": "number", "description": "Raio do buffer em metros"},
                 },
                 "required": ["geometry_ref", "raio_metros"],
@@ -392,7 +401,10 @@ TOOLS = [
                 "type": "object",
                 "properties": {
                     "geometry_ref_a": {"type": "string", "description": "Referência da primeira geometria"},
-                    "geometry_ref_b": {"type": "string", "description": "Referência da segunda geometria"},
+                    "geometry_ref_b": {
+                        "oneOf": [{"type": "string"}, {"type": "array", "items": {"type": "string"}}],
+                        "description": "Referência da segunda geometria (string ou lista para distância a múltiplos pontos)",
+                    },
                 },
                 "required": ["geometry_ref_a", "geometry_ref_b"],
                 "additionalProperties": False,
@@ -410,7 +422,10 @@ TOOLS = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "geometry_ref": {"type": "string", "description": "Referência da geometria do polígono"},
+                    "geometry_ref": {
+                        "oneOf": [{"type": "string"}, {"type": "array", "items": {"type": "string"}}],
+                        "description": "Referência da geometria do polígono (string ou lista para lote)",
+                    },
                 },
                 "required": ["geometry_ref"],
                 "additionalProperties": False,
@@ -428,7 +443,10 @@ TOOLS = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "geometry_ref": {"type": "string", "description": "Referência da geometria LineString"},
+                    "geometry_ref": {
+                        "oneOf": [{"type": "string"}, {"type": "array", "items": {"type": "string"}}],
+                        "description": "Referência da geometria LineString (string ou lista para lote)",
+                    },
                 },
                 "required": ["geometry_ref"],
                 "additionalProperties": False,
@@ -564,6 +582,137 @@ TOOLS = [
                 "type": "object",
                 "properties": {
                     "geometry_ref": {"type": "string", "description": "geometry_ref de LineString (de compute_route, search_road ou search_hydrography)"},
+                },
+                "required": ["geometry_ref"],
+                "additionalProperties": False,
+            },
+        },
+    },
+
+    # ═══════════════════════════════════════════════════════════════
+    # 8. OPERAÇÕES GEOMÉTRICAS AVANÇADAS
+    # ═══════════════════════════════════════════════════════════════
+    {
+        "type": "function",
+        "function": {
+            "name": "union",
+            "description": (
+                "Calcula a união geométrica de duas ou mais geometrias. Retorna geometry_ref + area_km2 ou length_km. "
+                "Use para: 'área total de Alegrete + Uruguaiana', 'zona que cobre ambos os municípios'."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "geometry_refs": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "minItems": 2,
+                        "description": "Lista de geometry_refs para unir (mínimo 2)",
+                    },
+                },
+                "required": ["geometry_refs"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "difference",
+            "description": (
+                "Calcula a diferença geométrica: A menos B. Retorna geometry_ref + area_km2 ou length_km. "
+                "Use para: 'área do RS fora da faixa de fronteira', 'município excluindo terras indígenas'."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "geometry_ref_a": {"type": "string", "description": "Geometria base (da qual será subtraído)"},
+                    "geometry_ref_b": {"type": "string", "description": "Geometria a subtrair"},
+                },
+                "required": ["geometry_ref_a", "geometry_ref_b"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "clip",
+            "description": (
+                "Recorta a geometria A pelos limites de B. Retorna a parte de A que está dentro de B. "
+                "Preserva o tipo: linha recortada por polígono retorna linha com length_km. "
+                "Use para: 'trecho da BR-290 dentro de Alegrete', 'parte do rio dentro do estado'."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "geometry_ref_a": {"type": "string", "description": "Geometria a recortar (linha ou polígono)"},
+                    "geometry_ref_b": {"type": "string", "description": "Geometria de recorte (polígono)"},
+                },
+                "required": ["geometry_ref_a", "geometry_ref_b"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "compute_centroid",
+            "description": (
+                "Calcula o centroide (ponto central) de uma geometria. Retorna lat, lon, geometry_ref (Point). "
+                "Use para: 'centro do município', 'ponto central da rota' — cria um Point reutilizável."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "geometry_ref": {"type": "string", "description": "geometry_ref de qualquer geometria"},
+                },
+                "required": ["geometry_ref"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "compute_route_waypoints",
+            "description": (
+                "Calcula uma rota rodoviária passando por múltiplos pontos na ordem fornecida. "
+                "Retorna distance_km, duration_min, length_km, geometry_ref (LineString). "
+                "Use para: 'rota de A a C passando por B', 'roteiro visitando 5 cidades'."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "geometry_refs": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "minItems": 2,
+                        "description": "Lista de geometry_refs dos waypoints na ordem de visita (mínimo 2)",
+                    },
+                },
+                "required": ["geometry_refs"],
+                "additionalProperties": False,
+            },
+        },
+    },
+
+    # ═══════════════════════════════════════════════════════════════
+    # 9. CLIMA
+    # ═══════════════════════════════════════════════════════════════
+    {
+        "type": "function",
+        "function": {
+            "name": "get_weather",
+            "description": (
+                "Retorna as condições meteorológicas atuais de um local. "
+                "Dados: temperatura, sensação térmica, umidade, precipitação, vento, condições. "
+                "Use para: 'como está o tempo em Porto Alegre?', 'condições climáticas para operação'."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "geometry_ref": {"type": "string", "description": "geometry_ref de ponto ou polígono (usa centroide)"},
                 },
                 "required": ["geometry_ref"],
                 "additionalProperties": False,

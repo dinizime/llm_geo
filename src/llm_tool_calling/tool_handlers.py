@@ -26,6 +26,15 @@ _ATTR_OPS = {
 }
 
 
+def _normalize_refs(value) -> list[str]:
+    """Accept a single string or a list of strings, return a list."""
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, list):
+        return [str(v) for v in value]
+    return [str(value)]
+
+
 def _safe_op(op_fn, a, b) -> bool:
     try:
         return op_fn(a, b)
@@ -85,19 +94,6 @@ def _fetch_json(url: str, timeout: int = 10, method: str = "GET",
 
 # ─── Open-Meteo Elevation API ─────────────────────────────────
 
-def _open_meteo_elevation(lat: float, lon: float) -> float | None:
-    """Get real elevation from Open-Meteo API. Returns meters or None."""
-    url = f"https://api.open-meteo.com/v1/elevation?latitude={lat}&longitude={lon}"
-    try:
-        req = urllib.request.Request(url, headers=_UA)
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            data = json.loads(resp.read())
-        elevs = data.get("elevation", [])
-        return round(elevs[0], 1) if elevs else None
-    except Exception:
-        return None
-
-
 def _open_meteo_elevations(points: list[tuple[float, float]]) -> list[float] | None:
     """Batch elevation query. points = [(lat, lon), ...]. Returns list of elevations or None."""
     if not points:
@@ -105,14 +101,17 @@ def _open_meteo_elevations(points: list[tuple[float, float]]) -> list[float] | N
     lats = ",".join(str(round(p[0], 6)) for p in points)
     lons = ",".join(str(round(p[1], 6)) for p in points)
     url = f"https://api.open-meteo.com/v1/elevation?latitude={lats}&longitude={lons}"
-    try:
-        req = urllib.request.Request(url, headers=_UA)
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            data = json.loads(resp.read())
-        elevs = data.get("elevation", [])
-        return [round(e, 1) for e in elevs] if len(elevs) == len(points) else None
-    except Exception:
+    data = _fetch_json(url, timeout=15)
+    if not data:
         return None
+    elevs = data.get("elevation", [])
+    return [round(e, 1) for e in elevs] if len(elevs) == len(points) else None
+
+
+def _open_meteo_elevation(lat: float, lon: float) -> float | None:
+    """Get elevation for a single point. Delegates to batch API."""
+    result = _open_meteo_elevations([(lat, lon)])
+    return result[0] if result else None
 
 
 # ─── Overpass (OSM) API ────────────────────────────────────────
@@ -402,27 +401,6 @@ def _ibge_municipality(nome: str, uf: str = None) -> dict | None:
     }
 
 
-def _ibge_municipalities_in_state(uf_code: str) -> list[dict] | None:
-    """List all municipalities in a state via IBGE API."""
-    url = (
-        f"https://servicodados.ibge.gov.br/api/v1/localidades/estados/{uf_code}"
-        f"/municipios?orderBy=nome"
-    )
-    try:
-        req = urllib.request.Request(url, headers=_UA)
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            data = json.loads(resp.read())
-        return [
-            {
-                "codigo_ibge": str(m["id"]),
-                "nome": m["nome"],
-                "uf": m["microrregiao"]["mesorregiao"]["UF"]["sigla"],
-            }
-            for m in data
-        ]
-    except Exception:
-        return None
-
 
 def _nominatim_geocode(place_name: str) -> dict | None:
     """Call Nominatim API for geocoding. Returns dict with lat, lon, display_name or None."""
@@ -431,20 +409,15 @@ def _nominatim_geocode(place_name: str) -> dict | None:
         f"https://nominatim.openstreetmap.org/search"
         f"?q={query}&format=json&limit=1&countrycodes=br"
     )
-    try:
-        req = urllib.request.Request(url, headers=_UA)
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            data = json.loads(resp.read())
-        if not data:
-            return None
-        hit = data[0]
-        return {
-            "lat": round(float(hit["lat"]), 6),
-            "lon": round(float(hit["lon"]), 6),
-            "display_name": hit.get("display_name", place_name),
-        }
-    except Exception:
+    data = _fetch_json(url, timeout=10)
+    if not data:
         return None
+    hit = data[0]
+    return {
+        "lat": round(float(hit["lat"]), 6),
+        "lon": round(float(hit["lon"]), 6),
+        "display_name": hit.get("display_name", place_name),
+    }
 
 
 def _nominatim_reverse(lat: float, lon: float) -> dict | None:
@@ -453,18 +426,15 @@ def _nominatim_reverse(lat: float, lon: float) -> dict | None:
         f"https://nominatim.openstreetmap.org/reverse"
         f"?lat={lat}&lon={lon}&format=json&zoom=10"
     )
-    try:
-        req = urllib.request.Request(url, headers=_UA)
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            data = json.loads(resp.read())
-        addr = data.get("address", {})
-        return {
-            "municipio": addr.get("city") or addr.get("town") or addr.get("municipality"),
-            "uf": addr.get("state"),
-            "display_name": data.get("display_name", ""),
-        }
-    except Exception:
+    data = _fetch_json(url, timeout=10)
+    if not data:
         return None
+    addr = data.get("address", {})
+    return {
+        "municipio": addr.get("city") or addr.get("town") or addr.get("municipality"),
+        "uf": addr.get("state"),
+        "display_name": data.get("display_name", ""),
+    }
 
 
 
@@ -508,16 +478,60 @@ def _overpass_border(pais: str) -> dict | None:
 def _osrm_route(
     o_lon: float, o_lat: float, d_lon: float, d_lat: float
 ) -> tuple[dict, float, int]:
-    """Call OSRM public demo server. Returns (geojson_geom, distance_km, duration_min).
-    Falls back to straight-line estimate if the request fails."""
+    """Call OSRM for a 2-point route. Delegates to _osrm_route_waypoints."""
+    return _osrm_route_waypoints([(o_lon, o_lat), (d_lon, d_lat)])
+
+
+_WMO_WEATHER_CODES = {
+    0: "Céu limpo", 1: "Principalmente limpo", 2: "Parcialmente nublado",
+    3: "Nublado", 45: "Nevoeiro", 48: "Nevoeiro com geada",
+    51: "Garoa leve", 53: "Garoa moderada", 55: "Garoa intensa",
+    61: "Chuva leve", 63: "Chuva moderada", 65: "Chuva forte",
+    71: "Neve leve", 73: "Neve moderada", 75: "Neve forte",
+    80: "Pancadas leves", 81: "Pancadas moderadas", 82: "Pancadas fortes",
+    95: "Trovoada", 96: "Trovoada com granizo leve", 99: "Trovoada com granizo forte",
+}
+
+
+def _open_meteo_weather(lat: float, lon: float) -> dict | None:
+    """Get current weather from Open-Meteo API."""
     url = (
-        f"http://router.project-osrm.org/route/v1/driving/"
-        f"{o_lon},{o_lat};{d_lon},{d_lat}"
+        f"https://api.open-meteo.com/v1/forecast"
+        f"?latitude={lat}&longitude={lon}"
+        f"&current=temperature_2m,relative_humidity_2m,apparent_temperature,"
+        f"precipitation,rain,wind_speed_10m,wind_direction_10m,weather_code"
+        f"&timezone=America/Sao_Paulo"
+    )
+    data = _fetch_json(url, timeout=10)
+    if not data or "current" not in data:
+        return None
+    c = data["current"]
+    return {
+        "temperature_c": c.get("temperature_2m"),
+        "apparent_temperature_c": c.get("apparent_temperature"),
+        "humidity_pct": c.get("relative_humidity_2m"),
+        "precipitation_mm": c.get("precipitation"),
+        "rain_mm": c.get("rain"),
+        "wind_speed_kmh": c.get("wind_speed_10m"),
+        "wind_direction_deg": c.get("wind_direction_10m"),
+        "weather_code": c.get("weather_code"),
+        "conditions": _WMO_WEATHER_CODES.get(c.get("weather_code", -1), "Desconhecido"),
+    }
+
+
+def _osrm_route_waypoints(
+    points: list[tuple[float, float]],
+) -> tuple[dict, float, int]:
+    """OSRM route through multiple waypoints. points = [(lon, lat), ...].
+    Returns (geojson_geom, distance_km, duration_min)."""
+    coords_str = ";".join(f"{lon},{lat}" for lon, lat in points)
+    url = (
+        f"http://router.project-osrm.org/route/v1/driving/{coords_str}"
         f"?overview=full&geometries=geojson"
     )
     try:
         req = urllib.request.Request(url, headers=_UA)
-        with urllib.request.urlopen(req, timeout=10) as resp:
+        with urllib.request.urlopen(req, timeout=15) as resp:
             data = json.loads(resp.read())
         route = data["routes"][0]
         geom = route["geometry"]
@@ -525,9 +539,12 @@ def _osrm_route(
         duration_min = round(route["duration"] / 60)
         return geom, distance_km, duration_min
     except Exception:
-        straight_km = geo.haversine(o_lon, o_lat, d_lon, d_lat)
-        road_km = round(straight_km * 1.3, 1)
-        geom = {"type": "LineString", "coordinates": [[o_lon, o_lat], [d_lon, d_lat]]}
+        geom = {"type": "LineString", "coordinates": [list(p) for p in points]}
+        total_km = sum(
+            geo.haversine(points[i][0], points[i][1], points[i + 1][0], points[i + 1][1])
+            for i in range(len(points) - 1)
+        )
+        road_km = round(total_km * 1.3, 1)
         return geom, road_km, round(road_km / 80 * 60)
 
 
@@ -663,17 +680,32 @@ class ToolHandlers:
             results.append(_format_product(p))
         return {"total": len(results), "products": results}
 
-    def buffer(self, geometry_ref: str, raio_metros: float) -> dict:
-        try:
-            geom = self.gs.get(geometry_ref)
-        except KeyError:
-            return {"error": f"Unknown geometry_ref: {geometry_ref}"}
+    def buffer(self, geometry_ref, raio_metros: float) -> dict:
+        refs = _normalize_refs(geometry_ref)
         raio_metros = max(1.0, float(raio_metros))
-        buffered = geo.buffer_meters(geom, raio_metros)
-        ref = self.gs.put(buffered, label=f"buffer_{raio_metros}m")
-        return {"geometry_ref": ref, "type": "Polygon",
-                "area_km2": geo.area_km2(buffered),
-                "description": f"Buffer de {raio_metros}m aplicado"}
+        if len(refs) == 1:
+            try:
+                geom = self.gs.get(refs[0])
+            except KeyError:
+                return {"error": f"Unknown geometry_ref: {refs[0]}"}
+            buffered = geo.buffer_meters(geom, raio_metros)
+            ref = self.gs.put(buffered, label=f"buffer_{raio_metros}m")
+            return {"geometry_ref": ref, "type": "Polygon",
+                    "area_km2": geo.area_km2(buffered),
+                    "description": f"Buffer de {raio_metros}m aplicado"}
+        results = []
+        for r in refs:
+            try:
+                geom = self.gs.get(r)
+            except KeyError:
+                results.append({"input_ref": r, "error": f"Unknown geometry_ref: {r}"})
+                continue
+            buffered = geo.buffer_meters(geom, raio_metros)
+            new_ref = self.gs.put(buffered, label=f"buffer_{raio_metros}m")
+            results.append({"input_ref": r, "geometry_ref": new_ref,
+                            "area_km2": geo.area_km2(buffered)})
+        return {"total": len(results), "results": results,
+                "description": f"Buffer de {raio_metros}m aplicado a {len(refs)} geometrias"}
 
     def intersect(self, geometry_ref_a: str, geometry_ref_b: str) -> dict:
         try:
@@ -734,31 +766,43 @@ class ToolHandlers:
                     "geometry_ref": ref}
         return {"error": f"Border with '{pais}' not found"}
 
-    def search_features(self, tipo: str, geometry_ref: str, atributo: str = None,
-                        operador: str = None, valor=None) -> dict:
-        key = tipo.lower().strip()
-        try:
-            area_geom = self.gs.get(geometry_ref)
-        except KeyError:
-            return {"error": f"Unknown geometry_ref: {geometry_ref}"}
-        if key not in _OSM_TAGS:
-            return {"total": 0, "features": [],
-                    "note": f"Feature type '{tipo}' not supported"}
+    def _search_features_single(self, key: str, area_geom: dict,
+                                atributo=None, operador=None, valor=None) -> list[dict]:
+        """Search features in a single area geometry. Returns list of feature entries."""
         bbox_tuple = geo.bbox(area_geom)
         osm_feats = _overpass_features_in_bbox(key, bbox_tuple)
         if not osm_feats:
-            return {"total": 0, "features": []}
+            return []
         results = []
         for f in osm_feats:
             if geo.intersects(f["geometry"], area_geom):
                 results.append(_feature_to_entry(f, self.gs))
-        # Attribute filter
         if atributo and operador is not None and valor is not None:
             op_fn = _ATTR_OPS.get(operador)
             if op_fn:
                 results = [f for f in results if f.get(atributo) is not None
                            and _safe_op(op_fn, f[atributo], valor)]
-        return {"total": len(results), "features": results}
+        return results
+
+    def search_features(self, tipo: str, geometry_ref=None, atributo: str = None,
+                        operador: str = None, valor=None) -> dict:
+        key = tipo.lower().strip()
+        if key not in _OSM_TAGS:
+            return {"total": 0, "features": [],
+                    "note": f"Feature type '{tipo}' not supported"}
+        refs = _normalize_refs(geometry_ref)
+        all_results = []
+        seen_names = set()
+        for r in refs:
+            try:
+                area_geom = self.gs.get(r)
+            except KeyError:
+                continue
+            for f in self._search_features_single(key, area_geom, atributo, operador, valor):
+                if f["nome"] not in seen_names:
+                    seen_names.add(f["nome"])
+                    all_results.append(f)
+        return {"total": len(all_results), "features": all_results}
 
     def search_military_installation(self, nome_ou_sigla: str,
                                       cidade: str = None) -> dict:
@@ -806,47 +850,81 @@ class ToolHandlers:
 
     # ─── Spatial computation & analysis (Shapely/pyproj) ───────
 
-    def compute_distance(self, geometry_ref_a: str, geometry_ref_b: str) -> dict:
+    def compute_distance(self, geometry_ref_a: str, geometry_ref_b=None) -> dict:
         try:
             geom_a = self.gs.get(geometry_ref_a)
-            geom_b = self.gs.get(geometry_ref_b)
-        except KeyError as e:
-            return {"error": f"Unknown geometry_ref: {e}"}
+        except KeyError:
+            return {"error": f"Unknown geometry_ref: {geometry_ref_a}"}
         lon_a, lat_a = geo.centroid(geom_a)
-        lon_b, lat_b = geo.centroid(geom_b)
-        dist = geo.haversine(lon_a, lat_a, lon_b, lat_b)
-        return {"distance_km": round(dist, 1)}
+        refs_b = _normalize_refs(geometry_ref_b)
+        if len(refs_b) == 1:
+            try:
+                geom_b = self.gs.get(refs_b[0])
+            except KeyError:
+                return {"error": f"Unknown geometry_ref: {refs_b[0]}"}
+            lon_b, lat_b = geo.centroid(geom_b)
+            return {"distance_km": round(geo.haversine(lon_a, lat_a, lon_b, lat_b), 1)}
+        results = []
+        for rb in refs_b:
+            try:
+                geom_b = self.gs.get(rb)
+            except KeyError:
+                results.append({"geometry_ref": rb, "error": f"Unknown geometry_ref: {rb}"})
+                continue
+            lon_b, lat_b = geo.centroid(geom_b)
+            results.append({"geometry_ref": rb,
+                            "distance_km": round(geo.haversine(lon_a, lat_a, lon_b, lat_b), 1)})
+        return {"from": geometry_ref_a, "total": len(results), "results": results}
 
-    def compute_area(self, geometry_ref: str) -> dict:
-        try:
-            geom = self.gs.get(geometry_ref)
-        except KeyError:
-            return {"error": f"Unknown geometry_ref: {geometry_ref}"}
-        if geom.get("type") not in ("Polygon", "MultiPolygon"):
-            return {"error": "Geometry is not a Polygon"}
-        area = geo.area_km2(geom)
-        return {"area_km2": area}
+    def compute_area(self, geometry_ref=None) -> dict:
+        refs = _normalize_refs(geometry_ref)
+        if len(refs) == 1:
+            try:
+                geom = self.gs.get(refs[0])
+            except KeyError:
+                return {"error": f"Unknown geometry_ref: {refs[0]}"}
+            if geom.get("type") not in ("Polygon", "MultiPolygon"):
+                return {"error": "Geometry is not a Polygon"}
+            return {"area_km2": geo.area_km2(geom)}
+        results = []
+        for r in refs:
+            try:
+                geom = self.gs.get(r)
+            except KeyError:
+                results.append({"geometry_ref": r, "error": f"Unknown"})
+                continue
+            if geom.get("type") not in ("Polygon", "MultiPolygon"):
+                results.append({"geometry_ref": r, "error": "Not a Polygon"})
+                continue
+            results.append({"geometry_ref": r, "area_km2": geo.area_km2(geom)})
+        return {"total": len(results), "results": results}
 
-    def compute_length(self, geometry_ref: str) -> dict:
-        try:
-            geom = self.gs.get(geometry_ref)
-        except KeyError:
-            return {"error": f"Unknown geometry_ref: {geometry_ref}"}
-        if geom.get("type") not in ("LineString", "MultiLineString"):
-            return {"error": "Geometry is not a LineString"}
-        length = geo.length_km(geom)
-        return {"length_km": length}
+    def compute_length(self, geometry_ref=None) -> dict:
+        refs = _normalize_refs(geometry_ref)
+        if len(refs) == 1:
+            try:
+                geom = self.gs.get(refs[0])
+            except KeyError:
+                return {"error": f"Unknown geometry_ref: {refs[0]}"}
+            if geom.get("type") not in ("LineString", "MultiLineString"):
+                return {"error": "Geometry is not a LineString"}
+            return {"length_km": geo.length_km(geom)}
+        results = []
+        for r in refs:
+            try:
+                geom = self.gs.get(r)
+            except KeyError:
+                results.append({"geometry_ref": r, "error": f"Unknown"})
+                continue
+            if geom.get("type") not in ("LineString", "MultiLineString"):
+                results.append({"geometry_ref": r, "error": "Not a LineString"})
+                continue
+            results.append({"geometry_ref": r, "length_km": geo.length_km(geom)})
+        return {"total": len(results), "results": results}
 
-    def find_nearest(self, tipo: str, geometry_ref: str, limit: int = 3) -> dict:
-        try:
-            ref_geom = self.gs.get(geometry_ref)
-        except KeyError:
-            return {"error": f"Unknown geometry_ref: {geometry_ref}"}
-        ref_lon, ref_lat = geo.centroid(ref_geom)
-        key = tipo.lower().strip()
-        if key not in _OSM_TAGS:
-            return {"total": 0, "nearest": [],
-                    "note": f"Feature type '{tipo}' not supported"}
+    def _find_nearest_single(self, key: str, ref_lon: float, ref_lat: float,
+                             limit: int) -> list[dict]:
+        """Find nearest features from a single point. Returns list of entries."""
         for radius_deg in (0.3, 0.8, 2.0):
             bbox_tuple = (ref_lon - radius_deg, ref_lat - radius_deg,
                           ref_lon + radius_deg, ref_lat + radius_deg)
@@ -858,12 +936,38 @@ class ToolHandlers:
                     dist = geo.haversine(ref_lon, ref_lat, f_lon, f_lat)
                     candidates.append((dist, f))
                 candidates.sort(key=lambda x: x[0])
-                results = []
-                for dist, f in candidates[:limit]:
-                    results.append(_feature_to_entry(
-                        f, self.gs, extra={"distance_km": round(dist, 1)}))
-                return {"total": len(results), "nearest": results}
-        return {"total": 0, "nearest": []}
+                return [
+                    _feature_to_entry(f, self.gs, extra={"distance_km": round(dist, 1)})
+                    for dist, f in candidates[:limit]
+                ]
+        return []
+
+    def find_nearest(self, tipo: str, geometry_ref=None, limit: int = 3) -> dict:
+        key = tipo.lower().strip()
+        if key not in _OSM_TAGS:
+            return {"total": 0, "nearest": [],
+                    "note": f"Feature type '{tipo}' not supported"}
+        refs = _normalize_refs(geometry_ref)
+        if len(refs) == 1:
+            try:
+                ref_geom = self.gs.get(refs[0])
+            except KeyError:
+                return {"error": f"Unknown geometry_ref: {refs[0]}"}
+            ref_lon, ref_lat = geo.centroid(ref_geom)
+            results = self._find_nearest_single(key, ref_lon, ref_lat, limit)
+            return {"total": len(results), "nearest": results}
+        # Batch: nearest per reference point
+        batch_results = []
+        for r in refs:
+            try:
+                ref_geom = self.gs.get(r)
+            except KeyError:
+                batch_results.append({"input_ref": r, "error": f"Unknown geometry_ref: {r}"})
+                continue
+            ref_lon, ref_lat = geo.centroid(ref_geom)
+            nearest = self._find_nearest_single(key, ref_lon, ref_lat, limit)
+            batch_results.append({"input_ref": r, "total": len(nearest), "nearest": nearest})
+        return {"total": len(batch_results), "results": batch_results}
 
     def check_spatial_relation(self, geometry_ref_a: str, geometry_ref_b: str) -> dict:
         try:
@@ -932,6 +1036,116 @@ class ToolHandlers:
         if not results:
             return {"error": f"No products found for articulation '{codigo}'"}
         return {"total": len(results), "products": results}
+
+    # ─── Advanced geometry operations ─────────────────────────
+
+    def union(self, geometry_refs) -> dict:
+        if isinstance(geometry_refs, str):
+            return {"error": "union requires at least 2 geometry_refs"}
+        if not isinstance(geometry_refs, list) or len(geometry_refs) < 2:
+            return {"error": "union requires at least 2 geometry_refs"}
+        geoms = []
+        for ref in geometry_refs:
+            try:
+                geoms.append(self.gs.get(ref))
+            except KeyError:
+                return {"error": f"Unknown geometry_ref: {ref}"}
+        result_geojson = geo.union_all(geoms)
+        is_empty = geo.to_shape(result_geojson).is_empty
+        new_ref = self.gs.put(result_geojson, label="union_result")
+        gtype = result_geojson.get("type", "")
+        result = {"geometry_ref": new_ref, "type": gtype, "is_empty": is_empty}
+        if gtype in ("Polygon", "MultiPolygon"):
+            result["area_km2"] = geo.area_km2(result_geojson)
+        if gtype in ("LineString", "MultiLineString"):
+            result["length_km"] = geo.length_km(result_geojson)
+        return result
+
+    def difference(self, geometry_ref_a: str, geometry_ref_b: str) -> dict:
+        try:
+            geom_a = self.gs.get(geometry_ref_a)
+            geom_b = self.gs.get(geometry_ref_b)
+        except KeyError as e:
+            return {"error": f"Unknown geometry_ref: {e}"}
+        result_geojson = geo.difference(geom_a, geom_b)
+        is_empty = geo.to_shape(result_geojson).is_empty
+        ref = self.gs.put(result_geojson, label="difference_result")
+        result = {"geometry_ref": ref, "type": result_geojson.get("type", ""),
+                  "is_empty": is_empty}
+        if not is_empty:
+            gtype = result_geojson.get("type", "")
+            if gtype in ("Polygon", "MultiPolygon"):
+                result["area_km2"] = geo.area_km2(result_geojson)
+            if gtype in ("LineString", "MultiLineString"):
+                result["length_km"] = geo.length_km(result_geojson)
+        return result
+
+    def clip(self, geometry_ref_a: str, geometry_ref_b: str) -> dict:
+        try:
+            geom_a = self.gs.get(geometry_ref_a)
+            geom_b = self.gs.get(geometry_ref_b)
+        except KeyError as e:
+            return {"error": f"Unknown geometry_ref: {e}"}
+        result_geojson = geo.intersection(geom_a, geom_b)
+        result_shape = geo.to_shape(result_geojson)
+        if result_shape.is_empty:
+            ref = self.gs.put(result_geojson, label="clip_empty")
+            return {"geometry_ref": ref, "is_empty": True}
+        ref = self.gs.put(result_geojson, label="clip_result")
+        gtype = result_geojson.get("type", "")
+        result = {"geometry_ref": ref, "type": gtype, "is_empty": False}
+        if gtype in ("LineString", "MultiLineString"):
+            result["length_km"] = geo.length_km(result_geojson)
+        elif gtype in ("Polygon", "MultiPolygon"):
+            result["area_km2"] = geo.area_km2(result_geojson)
+        return result
+
+    def compute_centroid(self, geometry_ref: str) -> dict:
+        try:
+            geom = self.gs.get(geometry_ref)
+        except KeyError:
+            return {"error": f"Unknown geometry_ref: {geometry_ref}"}
+        lon, lat = geo.centroid(geom)
+        point_geojson = {"type": "Point",
+                         "coordinates": [round(lon, 6), round(lat, 6)]}
+        ref = self.gs.put(point_geojson, label="centroid")
+        return {"lat": round(lat, 6), "lon": round(lon, 6), "geometry_ref": ref}
+
+    def compute_route_waypoints(self, geometry_refs) -> dict:
+        if isinstance(geometry_refs, str):
+            return {"error": "compute_route_waypoints requires at least 2 geometry_refs"}
+        if not isinstance(geometry_refs, list) or len(geometry_refs) < 2:
+            return {"error": "compute_route_waypoints requires at least 2 geometry_refs"}
+        points = []
+        for ref in geometry_refs:
+            try:
+                geom = self.gs.get(ref)
+            except KeyError:
+                return {"error": f"Unknown geometry_ref: {ref}"}
+            lon, lat = geo.centroid(geom)
+            points.append((lon, lat))
+        route_geom, distance_km, duration_min = _osrm_route_waypoints(points)
+        ref = self.gs.put(route_geom, label="route_waypoints")
+        return {
+            "distance_km": distance_km,
+            "duration_min": duration_min,
+            "length_km": geo.length_km(route_geom),
+            "waypoints": len(geometry_refs),
+            "geometry_ref": ref,
+        }
+
+    def get_weather(self, geometry_ref: str) -> dict:
+        try:
+            geom = self.gs.get(geometry_ref)
+        except KeyError:
+            return {"error": f"Unknown geometry_ref: {geometry_ref}"}
+        lon, lat = geo.centroid(geom)
+        weather = _open_meteo_weather(lat, lon)
+        if not weather:
+            return {"error": "Could not retrieve weather data"}
+        weather["lat"] = round(lat, 4)
+        weather["lon"] = round(lon, 4)
+        return weather
 
     # ─── Elevation & terrain (Open-Meteo) ─────────────────────
 

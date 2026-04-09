@@ -3,7 +3,9 @@
 import json
 import sys
 import threading
+import time
 import queue
+import uuid
 
 from dotenv import load_dotenv
 from flask import Flask, Response, jsonify, request
@@ -15,6 +17,7 @@ sys.stderr.reconfigure(encoding="utf-8", line_buffering=True)
 
 from .agent import run_agent
 from .benchmark import BENCHMARK_QUERIES, get_categories
+from .geometry_store import GeometryStore
 from .providers import PROVIDERS, create_client, detect_provider, get_default_model
 
 app = Flask(__name__)
@@ -25,6 +28,19 @@ _model = get_default_model(_provider_id)
 
 print(f"Provider: {PROVIDERS[_provider_id].name}", flush=True)
 print(f"Model: {_model}", flush=True)
+
+# ─── Server-side session store ────────────────────────────────
+_sessions: dict[str, dict] = {}
+_sessions_lock = threading.Lock()
+_SESSION_TTL = 1800  # 30 minutes
+
+
+def _cleanup_sessions():
+    now = time.time()
+    with _sessions_lock:
+        expired = [sid for sid, s in _sessions.items() if now - s["last_access"] > _SESSION_TTL]
+        for sid in expired:
+            del _sessions[sid]
 
 
 _TOOL_MESSAGES = {
@@ -54,6 +70,12 @@ _TOOL_MESSAGES = {
         "search_by_articulation": lambda a: f'Buscando articulação "{a.get("codigo", "")}"...',
         "get_elevation": lambda a: "Obtendo elevação...",
         "get_terrain_profile": lambda a: "Calculando perfil de terreno...",
+        "union": lambda a: "Calculando união...",
+        "difference": lambda a: "Calculando diferença...",
+        "clip": lambda a: "Recortando geometria...",
+        "compute_centroid": lambda a: "Calculando centroide...",
+        "compute_route_waypoints": lambda a: "Calculando rota com paradas...",
+        "get_weather": lambda a: "Obtendo clima...",
     },
     "tool_result": {
         "geocode": lambda a, r: f'{r.get("display_name", "?")} ({r.get("lat", "?")}, {r.get("lon", "?")})',
@@ -81,6 +103,12 @@ _TOOL_MESSAGES = {
         "search_by_articulation": lambda a, r: f'{r.get("total", 0)} produto(s)' if "total" in r else r.get("error", "?"),
         "get_elevation": lambda a, r: f'{r.get("elevation_m", r.get("avg_elevation_m", "?"))}m',
         "get_terrain_profile": lambda a, r: f'{r.get("classification", "?")} (slope máx: {r.get("max_slope_pct", "?")}%)',
+        "union": lambda a, r: f'Tipo: {r.get("type", "?")}' + (f', Área: {r.get("area_km2", "")} km²' if "area_km2" in r else ""),
+        "difference": lambda a, r: f'Área: {r.get("area_km2", "?")} km²' if not r.get("is_empty") else "Sem resultado",
+        "clip": lambda a, r: (f'{r.get("length_km", "?")} km' if "length_km" in r else f'{r.get("area_km2", "?")} km²') if not r.get("is_empty") else "Sem interseção",
+        "compute_centroid": lambda a, r: f'({r.get("lat", "?")}, {r.get("lon", "?")})',
+        "compute_route_waypoints": lambda a, r: f'{r.get("distance_km", "?")} km, {r.get("waypoints", "?")} paradas',
+        "get_weather": lambda a, r: f'{r.get("temperature_c", "?")}°C, {r.get("conditions", "?")}' if "temperature_c" in r else r.get("error", "?"),
     },
 }
 
@@ -124,12 +152,35 @@ def search():
     })
 
 
+@app.route("/api/clear-session", methods=["POST"])
+def clear_session():
+    data = request.get_json() or {}
+    session_id = data.get("session_id")
+    if session_id and session_id in _sessions:
+        del _sessions[session_id]
+    return jsonify({"ok": True})
+
+
 @app.route("/api/search-stream", methods=["POST"])
 def search_stream():
     data = request.get_json()
     query = data.get("query", "").strip()
+    session_id = data.get("session_id")
     if not query:
         return jsonify({"error": "Query vazia"}), 400
+
+    _cleanup_sessions()
+
+    # Resolve session
+    if session_id and session_id in _sessions:
+        session = _sessions[session_id]
+        session["last_access"] = time.time()
+        geometry_store = session["geometry_store"]
+        messages_history = session["messages"]
+    else:
+        session_id = uuid.uuid4().hex
+        geometry_store = GeometryStore()
+        messages_history = None
 
     q = queue.Queue()
 
@@ -138,7 +189,19 @@ def search_stream():
 
     def run_in_thread():
         try:
-            result = run_agent(query, client=_client, model=_model, provider_config=_provider_config, on_event=on_event)
+            result = run_agent(
+                query, client=_client, model=_model,
+                provider_config=_provider_config, on_event=on_event,
+                messages_history=messages_history,
+                geometry_store=geometry_store,
+            )
+
+            # Save session
+            _sessions[session_id] = {
+                "geometry_store": result._geometry_store,
+                "messages": result._messages,
+                "last_access": time.time(),
+            }
 
             # Extract products
             products = []
@@ -188,6 +251,7 @@ def search_stream():
                 "features": all_features,
                 "metrics": {"iterations": result.iterations, "duration_ms": result.duration_ms, "total_tokens": result.total_tokens},
                 "error": result.error,
+                "session_id": session_id,
             })
         except Exception as e:
             q.put({"type": "final", "answer": "", "products": [], "features": [], "metrics": {}, "error": str(e)})
@@ -403,6 +467,7 @@ details summary { cursor: pointer; font-size: 0.85em; color: #888; padding: 4px 
             <input type="text" id="query" placeholder="Pergunte sobre geografia, infraestrutura, rotas..."
                    autofocus autocomplete="off">
             <button id="btn" onclick="doSearch()">Buscar</button>
+            <button id="btn-new" onclick="newConversation()" title="Nova conversa" style="background:#666;padding:8px 12px;font-size:0.85em;">Nova</button>
         </div>
 
         <div class="feed" id="feed"></div>
@@ -460,6 +525,8 @@ const input = document.getElementById('query');
 const btn = document.getElementById('btn');
 const feed = document.getElementById('feed');
 input.addEventListener('keydown', e => { if (e.key === 'Enter') doSearch(); });
+
+let sessionId = null;  // Multi-turn session tracking
 
 const SVG_SPINNER = '<svg viewBox="0 0 24 24" fill="none" stroke="#1a5632" stroke-width="2.5"><circle cx="12" cy="12" r="10" stroke-dasharray="31.4 31.4" stroke-linecap="round"/></svg>';
 const SVG_CHECK = '<svg viewBox="0 0 24 24" fill="none" stroke="#2e7d32" stroke-width="2.5"><path d="M5 13l4 4L19 7"/></svg>';
@@ -682,21 +749,48 @@ function formatAnswer(text) {
     return thoughts + renderMarkdown(clean.trim());
 }
 
+function newConversation() {
+    if (sessionId) {
+        fetch('/api/clear-session', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({session_id: sessionId})
+        }).catch(() => {});
+    }
+    sessionId = null;
+    feed.innerHTML = '';
+    document.getElementById('results').style.display = 'none';
+    clearMap();
+    loadedOnMap = new Set();
+    input.value = '';
+    input.focus();
+}
+
 async function doSearch() {
     const query = input.value.trim();
     if (!query) return;
 
     btn.disabled = true;
-    feed.innerHTML = '';
+
+    // Add user message bubble to feed
+    const userDiv = document.createElement('div');
+    userDiv.className = 'feed-item';
+    userDiv.style.background = '#e8f5e9';
+    userDiv.style.borderLeft = '3px solid #1a5632';
+    userDiv.innerHTML = '<strong>Você:</strong> ' + esc(query);
+    feed.appendChild(userDiv);
+
     document.getElementById('results').style.display = 'none';
-    clearMap();
-    loadedOnMap = new Set();
+    feed.scrollTop = feed.scrollHeight;
+
+    const payload = {query};
+    if (sessionId) payload.session_id = sessionId;
 
     try {
         const res = await fetch('/api/search-stream', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({query})
+            body: JSON.stringify(payload)
         });
 
         const reader = res.body.getReader();
@@ -718,6 +812,8 @@ async function doSearch() {
         addFeedItem('Erro de conexão: ' + esc(e.message), SVG_WARN);
     } finally {
         btn.disabled = false;
+        input.value = '';
+        input.focus();
     }
 }
 
@@ -741,6 +837,7 @@ function handleEvent(ev) {
             finishLastSpinner();
             break;
         case 'final':
+            if (ev.session_id) sessionId = ev.session_id;
             renderResults(ev);
             break;
     }

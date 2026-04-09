@@ -53,11 +53,11 @@ P2. Feição mais próxima:
     Exemplo: "hospital mais próximo de Uruguaiana"
 
 P3. Feições ao longo de rota:
-    geocode(A) → geocode(B) → compute_route(origin, dest) → buffer(geometry_ref, 10) → search_features(tipo, buffer_ref)
+    geocode(A) → geocode(B) → compute_route(origin, dest) → buffer(geometry_ref, 5000) → search_features(tipo, buffer_ref)
     Exemplo: "pontes na rota entre Alegrete e Rosário do Sul"
 
 P4. Feições ao longo de rodovia:
-    search_road(código) → buffer(geometry_ref, 10) → search_features(tipo, buffer_ref)
+    search_road(código) → buffer(geometry_ref, 5000) → search_features(tipo, buffer_ref)
     Exemplo: "postos ao longo da BR-290"
 
 P5. Produtos por município/região:
@@ -76,6 +76,23 @@ P8. Rota + perfil de terreno:
     geocode(A) → geocode(B) → compute_route → get_terrain_profile(geometry_ref)
     Exemplo: "terreno entre Santa Maria e Caxias do Sul é montanhoso?"
 
+P9. Operação em lote (batch):
+    Quando múltiplas geometrias precisam da mesma operação, passe array de geometry_refs.
+    buffer(geometry_ref=["geom_1", "geom_2", ...], raio_metros=10000)
+    NÃO chame a tool N vezes individualmente.
+
+P10. Recorte espacial (clip):
+    search_road(código) → search_municipality(nome) → clip(geometry_ref_a=road_ref, geometry_ref_b=muni_ref)
+    Exemplo: "trecho da BR-290 dentro de Alegrete"
+
+P11. Clima em local:
+    geocode(lugar) → get_weather(geometry_ref)
+    Exemplo: "como está o tempo em Porto Alegre?"
+
+P12. Rota com paradas:
+    geocode(A) → geocode(B) → geocode(C) → compute_route_waypoints(geometry_refs=[A, B, C])
+    Exemplo: "rota de Alegrete a Porto Alegre passando por Santa Maria"
+
 # 4. COMO ESCOLHER ENTRE TOOLS SIMILARES
 
 | Pergunta | Tool correta | NÃO use |
@@ -88,14 +105,24 @@ P8. Rota + perfil de terreno:
 | "a rota passa por X?" | check_spatial_relation | intersect |
 | "X está dentro de Y?" | check_spatial_relation | intersect |
 | "área de sobreposição" | intersect | check_spatial_relation |
+| "tempo/clima em X" | get_weather | — |
+| "trecho de rodovia em município" | clip | intersect |
+| "união de áreas" | union | — |
+| "área X excluindo Y" | difference | intersect |
+| "centro de X" | compute_centroid | — |
+| "rota A→B→C com paradas" | compute_route_waypoints | compute_route |
 
 # 5. DICAS DE ANÁLISE
 
-- search_municipality retorna populacao, codigo_ibge. Use para perguntas de população.
+- search_municipality retorna populacao, codigo_ibge, area_km2. Use para perguntas de população/área.
 - search_features retorna atributos (altura_m, comprimento_m, leitos, pista_m, capacidade_ton).
   Analise para superlativos: "maior ponte" → ordene por comprimento_m.
 - search_products retorna escala e data_produto. Analise para "melhor escala" ou "mais recente".
 - Nomes ambíguos ("Santa Cruz"): search_municipality retorna candidatos → escolha o mais provável → repita com uf → continue o encadeamento normalmente.
+- BATCH: buffer, search_features, find_nearest, compute_distance, compute_area, compute_length aceitam
+  geometry_ref como array. Use para operar sobre múltiplas geometrias em uma única chamada.
+- Esta conversa é multi-turn: geometry_refs de respostas anteriores continuam válidos.
+  O usuário pode pedir "agora busque escolas perto de cada hospital" referenciando resultados anteriores.
 
 # 6. ESTILO DE RESPOSTA
 
@@ -120,6 +147,7 @@ class AgentResult:
     total_tokens: int = 0
     error: str | None = None
     _geometry_store: object = field(default=None, repr=False)
+    _messages: list[dict] = field(default_factory=list, repr=False)
 
 
 def _parse_tool_args(raw: str) -> dict:
@@ -167,21 +195,24 @@ def _extract_event_geometries(tool: str, args: dict, result: dict, gs) -> list[d
             "geometry": {"type": "Point", "coordinates": [result["lon"], result["lat"]]},
             "properties": {"name": label, "type": "geocode"},
         })
-    elif tool in ("compute_route", "search_road", "search_hydrography", "search_border"):
+    elif tool in ("compute_route", "compute_route_waypoints", "search_road", "search_hydrography", "search_border"):
         ref = result.get("geometry_ref")
         if ref:
             try:
                 geom = gs.get(ref)
                 name = result.get("nome", "") or result.get("pais", "") or "Rota"
-                if tool == "compute_route":
+                if tool in ("compute_route", "compute_route_waypoints"):
                     name = f"Rota ({result.get('distance_km', '?')} km)"
+                type_map = {"compute_route": "route", "compute_route_waypoints": "route",
+                            "search_road": "road", "search_hydrography": "river",
+                            "search_border": "border"}
                 features.append({
                     "type": "Feature", "geometry": geom,
-                    "properties": {"name": name, "type": {"compute_route": "route", "search_road": "road", "search_hydrography": "river", "search_border": "border"}[tool]},
+                    "properties": {"name": name, "type": type_map[tool]},
                 })
             except KeyError:
                 pass
-    elif tool in ("buffer", "intersect"):
+    elif tool in ("buffer", "intersect", "union", "difference", "clip"):
         ref = result.get("geometry_ref")
         if ref and not result.get("is_empty"):
             try:
@@ -244,6 +275,8 @@ def run_agent(
     model: str | None = None,
     provider_config: ProviderConfig | None = None,
     on_event: Callable[[dict], None] | None = None,
+    messages_history: list[dict] | None = None,
+    geometry_store: GeometryStore | None = None,
 ) -> AgentResult:
     if client is None:
         client, provider_config = _create_client()
@@ -254,13 +287,17 @@ def run_agent(
 
     extra_body = provider_config.extra_body if provider_config else None
 
-    geometry_store = GeometryStore()
+    geometry_store = geometry_store or GeometryStore()
     handlers = ToolHandlers(geometry_store)
 
-    messages = [
-        {"role": "system", "content": SYSTEM_PROMPT},
-        {"role": "user", "content": query},
-    ]
+    if messages_history is not None:
+        messages = list(messages_history)
+        messages.append({"role": "user", "content": query})
+    else:
+        messages = [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": query},
+        ]
 
     trace: list[dict] = []
     t0 = time.perf_counter()
@@ -305,6 +342,7 @@ def run_agent(
                     total_tokens=prompt_tokens + completion_tokens,
                     error=f"Rate limited at iteration {iteration + 1} after {MAX_RETRIES} retries: {e}",
                     _geometry_store=geometry_store,
+                    _messages=messages,
                 )
             except APIStatusError as e:
                 if e.status_code in (401, 402, 403):
@@ -316,6 +354,7 @@ def run_agent(
                         total_tokens=prompt_tokens + completion_tokens,
                         error=f"Auth/billing failed (HTTP {e.status_code}): {e.message}",
                         _geometry_store=geometry_store,
+                        _messages=messages,
                     )
                 wait = RETRY_BASE_DELAY * (2 ** attempt)
                 log.warning("  HTTP %d (attempt %d/%d), waiting %.0fs: %s",
@@ -332,6 +371,7 @@ def run_agent(
                     total_tokens=prompt_tokens + completion_tokens,
                     error=f"API error (HTTP {e.status_code}) at iteration {iteration + 1}: {e.message}",
                     _geometry_store=geometry_store,
+                    _messages=messages,
                 )
             except Exception as e:
                 wait = RETRY_BASE_DELAY * (2 ** attempt)
@@ -348,6 +388,7 @@ def run_agent(
                     total_tokens=prompt_tokens + completion_tokens,
                     error=f"API error at iteration {iteration + 1}: {e}",
                     _geometry_store=geometry_store,
+                    _messages=messages,
                 )
 
         if response is None or not response.choices:
@@ -360,6 +401,7 @@ def run_agent(
                 total_tokens=prompt_tokens + completion_tokens,
                 error=f"Empty response at iteration {iteration + 1}: {raw}",
                 _geometry_store=geometry_store,
+                _messages=messages,
             )
 
         if response.usage:
@@ -392,6 +434,7 @@ def run_agent(
                 prompt_tokens=prompt_tokens, completion_tokens=completion_tokens,
                 total_tokens=prompt_tokens + completion_tokens,
                 _geometry_store=geometry_store,
+                _messages=messages,
             )
             _emit(on_event, {"type": "done"})
             return result
@@ -466,4 +509,5 @@ def run_agent(
         total_tokens=prompt_tokens + completion_tokens,
         error="Max iterations reached",
         _geometry_store=geometry_store,
+        _messages=messages,
     )

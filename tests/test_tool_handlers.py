@@ -437,6 +437,165 @@ class TestFeaturesAlongRoute:
 # ═══════════════════════════════════════════════════════════════
 
 
+# ═══════════════════════════════════════════════════════════════
+# NEW TOOLS
+# ═══════════════════════════════════════════════════════════════
+
+
+class TestUnion:
+    def test_two_polygons(self):
+        h = make_handlers()
+        p1 = h.create_point(lat=-29.68, lon=-53.81)
+        p2 = h.create_point(lat=-29.69, lon=-53.82)
+        b1 = h.buffer(p1["geometry_ref"], 5000)
+        b2 = h.buffer(p2["geometry_ref"], 5000)
+        r = h.union([b1["geometry_ref"], b2["geometry_ref"]])
+        assert "geometry_ref" in r
+        assert not r.get("is_empty")
+        assert r.get("area_km2", 0) > 0
+
+    def test_needs_two_refs(self):
+        h = make_handlers()
+        r = h.union("single_ref")
+        assert "error" in r
+
+
+class TestDifference:
+    def test_basic(self):
+        h = make_handlers()
+        p = h.create_point(lat=-29.68, lon=-53.81)
+        big = h.buffer(p["geometry_ref"], 10000)
+        small = h.buffer(p["geometry_ref"], 5000)
+        r = h.difference(big["geometry_ref"], small["geometry_ref"])
+        assert "geometry_ref" in r
+        assert r.get("area_km2", 0) > 0
+
+    def test_non_overlapping(self):
+        h = make_handlers()
+        a = h.gs.put({"type": "Polygon", "coordinates": [
+            [[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]]]}, "a")
+        b = h.gs.put({"type": "Polygon", "coordinates": [
+            [[10, 10], [11, 10], [11, 11], [10, 11], [10, 10]]]}, "b")
+        r = h.difference(a, b)
+        assert r.get("area_km2", 0) > 0  # A unchanged since no overlap
+
+
+class TestClip:
+    def test_line_in_polygon(self):
+        h = make_handlers()
+        line = h.gs.put({"type": "LineString", "coordinates": [
+            [-54.0, -29.5], [-53.5, -30.0]]}, "line")
+        p = h.create_point(lat=-29.68, lon=-53.81)
+        poly = h.buffer(p["geometry_ref"], 15000)
+        r = h.clip(line, poly["geometry_ref"])
+        assert not r.get("is_empty")
+        assert r.get("length_km", 0) > 0
+
+    def test_no_overlap(self):
+        h = make_handlers()
+        line = h.gs.put({"type": "LineString", "coordinates": [
+            [0, 0], [1, 1]]}, "line")
+        poly = h.gs.put({"type": "Polygon", "coordinates": [
+            [[10, 10], [11, 10], [11, 11], [10, 11], [10, 10]]]}, "poly")
+        r = h.clip(line, poly)
+        assert r.get("is_empty") is True
+
+
+class TestComputeCentroid:
+    def test_polygon(self):
+        h = make_handlers()
+        p = h.create_point(lat=-29.68, lon=-53.81)
+        buf = h.buffer(p["geometry_ref"], 5000)
+        r = h.compute_centroid(buf["geometry_ref"])
+        assert "geometry_ref" in r
+        assert abs(r["lat"] - (-29.68)) < 0.1
+        assert abs(r["lon"] - (-53.81)) < 0.1
+
+
+class TestComputeRouteWaypoints:
+    def test_three_points(self):
+        h = make_handlers()
+        p1 = h.create_point(lat=-29.68, lon=-55.79)
+        p2 = h.create_point(lat=-29.69, lon=-53.81)
+        p3 = h.create_point(lat=-30.03, lon=-51.23)
+        r = h.compute_route_waypoints([
+            p1["geometry_ref"], p2["geometry_ref"], p3["geometry_ref"]])
+        assert "geometry_ref" in r
+        assert r["distance_km"] > 0
+        assert r["waypoints"] == 3
+
+    def test_needs_two_refs(self):
+        h = make_handlers()
+        r = h.compute_route_waypoints("single_ref")
+        assert "error" in r
+
+
+class TestGetWeather:
+    def test_point(self):
+        h = make_handlers()
+        pt = h.create_point(lat=-30.03, lon=-51.23)
+        r = h.get_weather(pt["geometry_ref"])
+        assert "temperature_c" in r or "error" in r
+
+
+# ═══════════════════════════════════════════════════════════════
+# BATCH OPERATIONS
+# ═══════════════════════════════════════════════════════════════
+
+
+class TestBatchBuffer:
+    def test_multiple_refs(self):
+        h = make_handlers()
+        refs = [h.create_point(lat=lat, lon=-53.81)["geometry_ref"]
+                for lat in [-29.68, -29.78, -29.88]]
+        r = h.buffer(refs, 5000)
+        assert r["total"] == 3
+        assert len(r["results"]) == 3
+        for res in r["results"]:
+            assert "geometry_ref" in res
+
+    def test_single_ref_unchanged(self):
+        h = make_handlers()
+        p = h.create_point(lat=-29.68, lon=-53.81)
+        r = h.buffer(p["geometry_ref"], 5000)
+        assert "geometry_ref" in r
+        assert "results" not in r
+
+
+class TestBatchComputeDistance:
+    def test_one_to_many(self):
+        h = make_handlers()
+        origin = h.create_point(lat=-29.68, lon=-53.81)
+        targets = [h.create_point(lat=lat, lon=-53.81)["geometry_ref"]
+                   for lat in [-29.78, -29.88]]
+        r = h.compute_distance(origin["geometry_ref"], targets)
+        assert len(r["results"]) == 2
+
+
+# ═══════════════════════════════════════════════════════════════
+# MULTI-TURN
+# ═══════════════════════════════════════════════════════════════
+
+
+class TestMultiTurn:
+    def test_geometry_store_persists(self):
+        from llm_tool_calling.geometry_store import GeometryStore
+        gs = GeometryStore()
+        h = ToolHandlers(gs)
+        r1 = h.create_point(lat=-29.68, lon=-53.81)
+        ref1 = r1["geometry_ref"]
+        # Simulate turn 2 with same gs
+        h2 = ToolHandlers(gs)
+        r2 = h2.buffer(ref1, 5000)
+        assert "geometry_ref" in r2
+        assert r2.get("area_km2", 0) > 0
+
+
+# ═══════════════════════════════════════════════════════════════
+# ELEVATION (Open-Meteo)
+# ═══════════════════════════════════════════════════════════════
+
+
 class TestGetElevation:
     def test_point(self):
         h = make_handlers()

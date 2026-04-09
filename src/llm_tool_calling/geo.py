@@ -4,7 +4,7 @@ import math
 
 from pyproj import Geod
 from shapely.geometry import mapping, shape
-from shapely.ops import transform
+from shapely.ops import transform, unary_union
 
 _GEOD = Geod(ellps="WGS84")
 
@@ -53,6 +53,19 @@ def contains(a: dict, b: dict) -> bool:
 def intersection(a: dict, b: dict) -> dict:
     """Compute the intersection of two GeoJSON geometries. Returns GeoJSON."""
     result = to_shape(a).intersection(to_shape(b))
+    return to_geojson(result)
+
+
+def union_all(geojsons: list[dict]) -> dict:
+    """Compute the union of multiple GeoJSON geometries. Returns GeoJSON."""
+    shapes = [to_shape(g) for g in geojsons]
+    result = unary_union(shapes)
+    return to_geojson(result)
+
+
+def difference(a: dict, b: dict) -> dict:
+    """Compute A minus B (geometric difference). Returns GeoJSON."""
+    result = to_shape(a).difference(to_shape(b))
     return to_geojson(result)
 
 
