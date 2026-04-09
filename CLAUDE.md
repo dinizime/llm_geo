@@ -17,21 +17,25 @@ resolve encadeando tools espaciais.
 - **OpenRouter** como gateway de LLM (API compatível com OpenAI)
 - **SDK openai** (apontando para OpenRouter)
 - **PostgreSQL** local (postgres/postgres) para armazenar resultados dos benchmarks
-- **pytest** para testes unitários
+- **Shapely** + **pyproj** para operações geométricas reais
+- **pytest** para testes de integração
 - Sem framework de agente — while-loop direto
 
 ## Arquitetura
 
 ```
-Pergunta (texto) → Agent Loop (while tool_calls) → Tools simuladas → Resposta
-     │                                                                    │
-     └─── benchmark.py (~180 queries) ──→ runner.py ──→ PostgreSQL ──→ report.py ──→ HTML
+Pergunta (texto) → Agent Loop (while tool_calls) → Tools reais → Resposta
+     │                                                                │
+     └─── benchmark.py (~226 queries) ──→ runner.py ──→ PostgreSQL ──→ report.py ──→ HTML
 ```
 
 - O agent loop é um while-loop simples (~70 linhas)
-- As tools são **simuladas** — retornam dados sintéticos determinísticos
+- As tools usam **APIs reais**: Nominatim (geocoding), Overpass/OSM (feições),
+  IBGE (municípios/estados), OSRM (rotas), Open-Meteo (elevação)
+- Operações geométricas usam **Shapely/pyproj** (intersect, contains, area, length)
+- Dados de domínio do Geoportal (produtos, instalações militares, regiões nomeadas) são mantidos localmente
 - O GeometryStore mantém referências de geometria fora do contexto do LLM
-- O runner testa N modelos contra ~180 queries e salva resultados no PostgreSQL
+- O runner testa N modelos contra ~226 queries e salva resultados no PostgreSQL
 - O report gera `reports/index.html` estático com gráficos comparativos
 
 ## Estrutura de pastas
@@ -45,9 +49,10 @@ Pergunta (texto) → Agent Loop (while tool_calls) → Tools simuladas → Respo
 ├── src/llm_tool_calling/
 │   ├── agent.py                # Agent loop (while tool_calls)
 │   ├── tools.py                # 26 tool definitions (JSON schema)
-│   ├── tool_handlers.py        # Implementação simulada das tools
+│   ├── tool_handlers.py        # Implementação das tools (APIs reais)
+│   ├── geo.py                  # Operações geométricas (Shapely/pyproj)
 │   ├── geometry_store.py       # Store de geometrias (refs, não GeoJSON)
-│   ├── synthetic_data.py       # Dados sintéticos determinísticos
+│   ├── synthetic_data.py       # Dados de domínio do Geoportal (produtos, OM, regiões)
 │   ├── benchmark.py            # ~180 queries categorizadas com expectativas
 │   ├── runner.py               # CLI: roda benchmark multi-modelo
 │   ├── report.py               # Gera relatório HTML com gráficos
