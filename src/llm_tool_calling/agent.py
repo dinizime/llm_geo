@@ -53,11 +53,11 @@ P2. Feição mais próxima:
     Exemplo: "hospital mais próximo de Uruguaiana"
 
 P3. Feições ao longo de rota:
-    geocode(A) → geocode(B) → compute_route(origin, dest) → buffer(geometry_ref, 5000) → search_features(tipo, buffer_ref)
+    geocode(A) → geocode(B) → compute_route(origin, dest) → buffer(geometry_ref, 10) → search_features(tipo, buffer_ref)
     Exemplo: "pontes na rota entre Alegrete e Rosário do Sul"
 
 P4. Feições ao longo de rodovia:
-    search_road(código) → buffer(geometry_ref, 5000) → search_features(tipo, buffer_ref)
+    search_road(código) → buffer(geometry_ref, 10) → search_features(tipo, buffer_ref)
     Exemplo: "postos ao longo da BR-290"
 
 P5. Produtos por município/região:
@@ -126,6 +126,8 @@ P12. Rota com paradas:
 
 # 6. ESTILO DE RESPOSTA
 
+- SEMPRE use Markdown para formatar respostas. NUNCA use HTML (nada de <p>, <b>, <br>, etc.).
+  Use **negrito**, *itálico*, listas com - ou 1., e `código` quando necessário.
 - ANTES de chamar tools, explique brevemente seu raciocínio.
   Ex: "Preciso localizar as duas cidades para calcular a rota."
 - Na resposta final, dê conclusão clara e direta com os dados encontrados.
@@ -425,6 +427,8 @@ def run_agent(
             })
 
         if choice.finish_reason == "stop" or not choice.message.tool_calls:
+            # Append final assistant message so multi-turn history is complete
+            messages.append({"role": "assistant", "content": choice.message.content or ""})
             elapsed = int((time.perf_counter() - t0) * 1000)
             log.debug("  done in %d iterations, %dms, %d tokens",
                        iteration + 1, elapsed, prompt_tokens + completion_tokens)

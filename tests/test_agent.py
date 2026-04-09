@@ -23,7 +23,7 @@ pytestmark = pytest.mark.skipif(
 
 
 def tool_names(result) -> list[str]:
-    return [tc["name"] for tc in result.tool_calls_made]
+    return [step["tool"] for step in result.trace]
 
 
 def assert_tools_present(result, required: list[str], label: str = ""):

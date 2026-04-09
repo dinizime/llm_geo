@@ -156,8 +156,9 @@ def search():
 def clear_session():
     data = request.get_json() or {}
     session_id = data.get("session_id")
-    if session_id and session_id in _sessions:
-        del _sessions[session_id]
+    with _sessions_lock:
+        if session_id and session_id in _sessions:
+            del _sessions[session_id]
     return jsonify({"ok": True})
 
 
@@ -172,15 +173,16 @@ def search_stream():
     _cleanup_sessions()
 
     # Resolve session
-    if session_id and session_id in _sessions:
-        session = _sessions[session_id]
-        session["last_access"] = time.time()
-        geometry_store = session["geometry_store"]
-        messages_history = session["messages"]
-    else:
-        session_id = uuid.uuid4().hex
-        geometry_store = GeometryStore()
-        messages_history = None
+    with _sessions_lock:
+        if session_id and session_id in _sessions:
+            session = _sessions[session_id]
+            session["last_access"] = time.time()
+            geometry_store = session["geometry_store"]
+            messages_history = session["messages"]
+        else:
+            session_id = uuid.uuid4().hex
+            geometry_store = GeometryStore()
+            messages_history = None
 
     q = queue.Queue()
 
@@ -197,11 +199,12 @@ def search_stream():
             )
 
             # Save session
-            _sessions[session_id] = {
-                "geometry_store": result._geometry_store,
-                "messages": result._messages,
-                "last_access": time.time(),
-            }
+            with _sessions_lock:
+                _sessions[session_id] = {
+                    "geometry_store": result._geometry_store,
+                    "messages": result._messages,
+                    "last_access": time.time(),
+                }
 
             # Extract products
             products = []
@@ -305,14 +308,23 @@ SEARCH_HTML = r"""<!DOCTYPE html>
 <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
 <style>
 * { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; overflow: hidden; }
 body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f5f7fa; color: #1a1a2e; }
 
-.layout { display: flex; height: 100vh; position: relative; }
-.panel { width: 520px; min-width: 380px; max-width: 55vw; overflow-y: auto; padding: 16px; border-right: 1px solid #ddd; background: #fff; display: flex; flex-direction: column; }
-.map-container { flex: 1; position: relative; }
+.layout { display: flex; height: 100vh; overflow: hidden; position: relative; }
+.panel {
+    width: 520px; min-width: 380px; max-width: 55vw;
+    border-right: 1px solid #ddd; background: #fff;
+    display: flex; flex-direction: column; overflow: hidden;
+}
+.map-container { flex: 1; position: relative; overflow: hidden; }
 #map { width: 100%; height: 100%; }
 
-.panel-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+/* Panel: header (top), body (scrollable middle), input (bottom) */
+.panel-header {
+    flex-shrink: 0; display: flex; align-items: center; justify-content: space-between;
+    padding: 12px 16px; border-bottom: 1px solid #eee;
+}
 h1 { font-size: 1.1em; color: #1a5632; }
 .bench-toggle {
     padding: 5px 10px; background: none; border: 1px solid #ccc; border-radius: 6px;
@@ -321,18 +333,23 @@ h1 { font-size: 1.1em; color: #1a5632; }
 }
 .bench-toggle:hover { border-color: #1a5632; color: #1a5632; background: #f0f7f0; }
 
-.search-box { display: flex; gap: 6px; margin-bottom: 14px; }
-.search-box input {
-    flex: 1; padding: 9px 12px; font-size: 0.9em; border: 1.5px solid #ddd;
+.panel-body { flex: 1; overflow-y: auto; padding: 12px 16px; }
+
+.panel-input {
+    flex-shrink: 0; display: flex; gap: 6px;
+    padding: 10px 16px; border-top: 1px solid #eee; background: #fff;
+}
+.panel-input input {
+    flex: 1; padding: 10px 12px; font-size: 0.9em; border: 1.5px solid #ddd;
     border-radius: 8px; outline: none; transition: border 0.2s;
 }
-.search-box input:focus { border-color: #1a5632; }
-.search-box button {
+.panel-input input:focus { border-color: #1a5632; }
+.panel-input button {
     padding: 8px 14px; background: #1a5632; color: white; border: none;
     border-radius: 8px; font-size: 0.82em; cursor: pointer; white-space: nowrap;
 }
-.search-box button:hover { background: #2d7a4a; }
-.search-box button:disabled { background: #999; cursor: wait; }
+.panel-input button:hover { background: #2d7a4a; }
+.panel-input button:disabled { background: #999; cursor: wait; }
 
 @media (max-width: 900px) {
     .layout { flex-direction: column; }
@@ -341,14 +358,15 @@ h1 { font-size: 1.1em; color: #1a5632; }
     .bench-drawer { width: 100% !important; min-width: unset !important; }
 }
 @media (max-width: 600px) {
-    .panel { padding: 10px; height: 55vh; }
+    .panel-body { padding: 8px 10px; }
+    .panel-input { padding: 8px 10px; }
     h1 { font-size: 1em; }
-    .search-box input { font-size: 0.85em; padding: 8px 10px; }
-    .search-box button { padding: 8px 10px; font-size: 0.8em; }
+    .panel-input input { font-size: 0.85em; padding: 8px 10px; }
+    .panel-input button { padding: 8px 10px; font-size: 0.8em; }
 }
 
 /* Feed */
-.feed { margin-bottom: 12px; flex-shrink: 0; }
+.feed { flex-shrink: 0; }
 .feed-item {
     display: flex; align-items: flex-start; gap: 8px;
     padding: 5px 0; animation: fadeIn 0.3s ease-in; font-size: 0.85em;
@@ -361,8 +379,19 @@ h1 { font-size: 1.1em; color: #1a5632; }
 .feed-text { color: #555; }
 .feed-text.muted { color: #999; font-size: 0.9em; }
 
+/* User message bubble */
+.user-msg {
+    padding: 8px 12px; margin: 6px 0;
+    background: #e8f5e9; border-radius: 12px 12px 4px 12px;
+    font-size: 0.9em; line-height: 1.45;
+    align-self: flex-end; max-width: 90%;
+    margin-left: auto; /* push right */
+    word-wrap: break-word;
+}
+.user-msg strong { color: #1a5632; margin-right: 6px; }
+
 /* Answer */
-.answer-section { margin-bottom: 12px; }
+.answer-section { margin: 8px 0 12px; }
 .answer-box {
     background: #f8faf8; border-radius: 8px; padding: 12px 14px;
     border-left: 3px solid #1a5632; line-height: 1.55; font-size: 0.9em;
@@ -385,7 +414,17 @@ h1 { font-size: 1.1em; color: #1a5632; }
 
 /* Results cards */
 .results-section { margin-bottom: 12px; }
-.results-section h2 { font-size: 0.9em; color: #666; margin-bottom: 6px; }
+.results-section-header {
+    display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px;
+}
+.results-section-header h2 { font-size: 0.9em; color: #666; margin: 0; }
+.add-all-btn {
+    font-size: 0.75em; padding: 3px 10px; border: 1px solid #1a5632; border-radius: 6px;
+    background: none; color: #1a5632; cursor: pointer; transition: all 0.2s;
+    display: flex; align-items: center; gap: 4px;
+}
+.add-all-btn:hover { background: #e8f5e9; }
+
 .result-card {
     background: #f8f9fa; border-radius: 6px; padding: 8px 12px;
     margin-bottom: 4px; font-size: 0.85em; display: flex; justify-content: space-between; align-items: center;
@@ -403,6 +442,18 @@ h1 { font-size: 1.1em; color: #1a5632; }
 /* Collapsible */
 details { margin-bottom: 6px; }
 details summary { cursor: pointer; font-size: 0.85em; color: #888; padding: 4px 0; user-select: none; }
+
+/* Collapsible features */
+.features-toggle { margin-bottom: 8px; }
+.features-toggle summary {
+    cursor: pointer; user-select: none; list-style: none;
+}
+.features-toggle summary::-webkit-details-marker { display: none; }
+.features-toggle[open] .feat-arrow { transform: rotate(90deg); }
+.feat-arrow {
+    display: inline-block; transition: transform 0.2s; font-size: 0.7em;
+    margin-right: 4px; color: #888;
+}
 
 .metrics { display: flex; gap: 14px; font-size: 0.78em; color: #aaa; margin-top: 4px; }
 
@@ -460,39 +511,53 @@ details summary { cursor: pointer; font-size: 0.85em; color: #888; padding: 4px 
     <div class="panel">
         <div class="panel-header">
             <h1>Geoportal — Assistente Espacial</h1>
-            <button class="bench-toggle" onclick="toggleBenchmark()" title="Banco de perguntas">&#9776; Banco de perguntas</button>
+            <div style="display:flex;gap:6px;align-items:center">
+                <button class="bench-toggle" onclick="toggleBenchmark()" title="Banco de perguntas">&#9776; Banco</button>
+                <button class="bench-toggle" onclick="newConversation()" title="Nova conversa">+ Nova</button>
+            </div>
         </div>
 
-        <div class="search-box">
+        <div class="panel-body" id="panel-body">
+            <div class="feed" id="feed"></div>
+
+            <div id="results" style="display:none">
+                <div id="error-container"></div>
+
+                <div class="answer-section" id="answer-section" style="display:none">
+                    <div class="answer-box" id="answer"></div>
+                </div>
+
+                <div class="results-section" id="features-section" style="display:none">
+                    <details class="features-toggle" open>
+                        <summary>
+                            <div class="results-section-header">
+                                <h2><span class="feat-arrow">&#9654;</span> <span id="features-title">Feições encontradas</span></h2>
+                                <button class="add-all-btn" id="add-all-features" title="Adicionar todas ao mapa">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="12" height="12"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z"/><circle cx="12" cy="9" r="2.5"/></svg>
+                                    Adicionar todas
+                                </button>
+                            </div>
+                        </summary>
+                        <div id="features-list"></div>
+                    </details>
+                </div>
+
+                <div class="results-section" id="products-section" style="display:none">
+                    <h2>Produtos encontrados (<span id="product-count">0</span>)</h2>
+                    <div id="products-list"></div>
+                </div>
+
+                <details>
+                    <summary>Consumo</summary>
+                    <div class="metrics" id="metrics"></div>
+                </details>
+            </div>
+        </div>
+
+        <div class="panel-input">
             <input type="text" id="query" placeholder="Pergunte sobre geografia, infraestrutura, rotas..."
                    autofocus autocomplete="off">
-            <button id="btn" onclick="doSearch()">Buscar</button>
-            <button id="btn-new" onclick="newConversation()" title="Nova conversa" style="background:#666;padding:8px 12px;font-size:0.85em;">Nova</button>
-        </div>
-
-        <div class="feed" id="feed"></div>
-
-        <div id="results" style="display:none">
-            <div id="error-container"></div>
-
-            <div class="answer-section" id="answer-section" style="display:none">
-                <div class="answer-box" id="answer"></div>
-            </div>
-
-            <div class="results-section" id="features-section" style="display:none">
-                <h2 id="features-title">Feições encontradas</h2>
-                <div id="features-list"></div>
-            </div>
-
-            <div class="results-section" id="products-section" style="display:none">
-                <h2>Produtos encontrados (<span id="product-count">0</span>)</h2>
-                <div id="products-list"></div>
-            </div>
-
-            <details>
-                <summary>Consumo</summary>
-                <div class="metrics" id="metrics"></div>
-            </details>
+            <button id="btn" onclick="doSearch()">Enviar</button>
         </div>
     </div>
     <!-- Benchmark drawer -->
@@ -524,9 +589,11 @@ details summary { cursor: pointer; font-size: 0.85em; color: #888; padding: 4px 
 const input = document.getElementById('query');
 const btn = document.getElementById('btn');
 const feed = document.getElementById('feed');
+const panelBody = document.getElementById('panel-body');
 input.addEventListener('keydown', e => { if (e.key === 'Enter') doSearch(); });
 
 let sessionId = null;  // Multi-turn session tracking
+let sessionMetrics = { duration_ms: 0, total_tokens: 0, iterations: 0 };
 
 const SVG_SPINNER = '<svg viewBox="0 0 24 24" fill="none" stroke="#1a5632" stroke-width="2.5"><circle cx="12" cy="12" r="10" stroke-dasharray="31.4 31.4" stroke-linecap="round"/></svg>';
 const SVG_CHECK = '<svg viewBox="0 0 24 24" fill="none" stroke="#2e7d32" stroke-width="2.5"><path d="M5 13l4 4L19 7"/></svg>';
@@ -629,6 +696,26 @@ function addToMap(geojsonFeatures) {
 }
 
 let loadedOnMap = new Set();
+let _currentFeatures = [];
+
+// "Add all features to map" button
+document.getElementById('add-all-features').addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const toAdd = [];
+    _currentFeatures.forEach((f, i) => {
+        if (!f._geometry) return;
+        const key = f.nome || i;
+        if (loadedOnMap.has(key)) return;
+        loadedOnMap.add(key);
+        toAdd.push({
+            type: 'Feature',
+            geometry: f._geometry,
+            properties: {name: f.nome || '', type: f._tipo || 'feature'}
+        });
+    });
+    if (toAdd.length) addToMap(toAdd);
+});
 
 function zoomToGeometry(geom) {
     const bounds = new maplibregl.LngLatBounds();
@@ -661,7 +748,7 @@ function addFeedItem(html, iconHtml, mapFeatures) {
         });
     }
     feed.appendChild(item);
-    item.scrollIntoView({behavior: 'smooth', block: 'nearest'});
+    panelBody.scrollTop = panelBody.scrollHeight;
     return item;
 }
 
@@ -715,8 +802,25 @@ function formatThinking(text) {
     return html || esc(text);
 }
 
+function sanitizeHtml(html) {
+    // Strip dangerous tags but keep safe formatting tags
+    html = html.replace(/<script[\s\S]*?<\/script>/gi, '');
+    html = html.replace(/<style[\s\S]*?<\/style>/gi, '');
+    html = html.replace(/on\w+="[^"]*"/gi, '');
+    html = html.replace(/on\w+='[^']*'/gi, '');
+    return html;
+}
+
+function looksLikeHtml(text) {
+    return /<\/?(?:p|b|i|em|strong|ul|ol|li|br|h[1-6]|div|span|a|table|tr|td|th)\b/i.test(text);
+}
+
 function renderMarkdown(text) {
-    // Escape HTML first, then apply markdown transforms
+    // If the model already returned HTML, sanitize and pass through
+    if (looksLikeHtml(text)) {
+        return sanitizeHtml(text);
+    }
+    // Otherwise apply markdown transforms
     let html = esc(text);
     // Bold: **text**
     html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
@@ -758,10 +862,12 @@ function newConversation() {
         }).catch(() => {});
     }
     sessionId = null;
+    sessionMetrics = { duration_ms: 0, total_tokens: 0, iterations: 0 };
     feed.innerHTML = '';
     document.getElementById('results').style.display = 'none';
     clearMap();
     loadedOnMap = new Set();
+    _currentFeatures = [];
     input.value = '';
     input.focus();
 }
@@ -771,17 +877,16 @@ async function doSearch() {
     if (!query) return;
 
     btn.disabled = true;
+    input.value = '';
 
     // Add user message bubble to feed
     const userDiv = document.createElement('div');
-    userDiv.className = 'feed-item';
-    userDiv.style.background = '#e8f5e9';
-    userDiv.style.borderLeft = '3px solid #1a5632';
-    userDiv.innerHTML = '<strong>Você:</strong> ' + esc(query);
+    userDiv.className = 'user-msg';
+    userDiv.innerHTML = esc(query);
     feed.appendChild(userDiv);
 
     document.getElementById('results').style.display = 'none';
-    feed.scrollTop = feed.scrollHeight;
+    panelBody.scrollTop = panelBody.scrollHeight;
 
     const payload = {query};
     if (sessionId) payload.session_id = sessionId;
@@ -812,7 +917,6 @@ async function doSearch() {
         addFeedItem('Erro de conexão: ' + esc(e.message), SVG_WARN);
     } finally {
         btn.disabled = false;
-        input.value = '';
         input.focus();
     }
 }
@@ -869,6 +973,7 @@ function renderResults(data) {
     const featSection = document.getElementById('features-section');
     const featList = document.getElementById('features-list');
     const feats = data.features || [];
+    _currentFeatures = feats;
     if (feats.length) {
         featSection.style.display = 'block';
         document.getElementById('features-title').textContent = `Feições encontradas (${feats.length})`;
@@ -891,7 +996,6 @@ function renderResults(data) {
                 card.querySelector('.map-btn').addEventListener('click', () => {
                     const key = f.nome || i;
                     if (loadedOnMap.has(key)) {
-                        // Already loaded — just zoom to it
                         zoomToGeometry(f._geometry);
                         return;
                     }
@@ -951,14 +1055,19 @@ function renderResults(data) {
         prodSection.style.display = 'none';
     }
 
-    // Metrics
+    // Metrics — accumulate across multi-turn
     if (data.metrics?.duration_ms) {
+        sessionMetrics.duration_ms += data.metrics.duration_ms || 0;
+        sessionMetrics.total_tokens += data.metrics.total_tokens || 0;
+        sessionMetrics.iterations += data.metrics.iterations || 0;
         document.getElementById('metrics').innerHTML =
-            `<span>Tempo: ${(data.metrics.duration_ms/1000).toFixed(1)}s</span>` +
-            `<span>Tokens: ${(data.metrics.total_tokens || 0).toLocaleString('pt-BR')}</span>` +
-            `<span>Iterações: ${data.metrics.iterations || 0}</span>`;
+            `<span>Tempo: ${(sessionMetrics.duration_ms/1000).toFixed(1)}s</span>` +
+            `<span>Tokens: ${sessionMetrics.total_tokens.toLocaleString('pt-BR')}</span>` +
+            `<span>Iterações: ${sessionMetrics.iterations}</span>`;
     }
 
+    // Auto-scroll to see results
+    setTimeout(() => { panelBody.scrollTop = panelBody.scrollHeight; }, 50);
 }
 
 function esc(s) {
@@ -1015,6 +1124,7 @@ function renderBenchmark() {
             row.className = 'bench-query';
             row.innerHTML = `<span class="qid">${esc(q.id)}</span><span class="qtxt">${esc(q.query)}</span><span class="bench-diff ${q.difficulty}">${q.difficulty}</span>`;
             row.addEventListener('click', () => {
+                newConversation();
                 input.value = q.query;
                 benchDrawer.style.display = 'none';
                 doSearch();

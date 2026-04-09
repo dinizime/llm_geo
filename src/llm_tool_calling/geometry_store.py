@@ -26,5 +26,8 @@ class GeometryStore:
             "label": entry["label"],
         }
 
+    def __len__(self):
+        return len(self._store)
+
     def clear(self):
         self._store.clear()

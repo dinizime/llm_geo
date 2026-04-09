@@ -307,7 +307,7 @@ TOOLS = [
             "description": (
                 "Cria uma zona de buffer circular (polígono) ao redor de qualquer geometria. Retorna geometry_ref e area_km2. "
                 "Use para criar áreas de busca ao redor de pontos, rotas ou fronteiras. "
-                "Raios típicos: 5000m (local), 20000m (regional), 150000m (faixa de fronteira)."
+                "Raios típicos: 10m (rota local), 5000m (local), 20000m (regional), 150000m (faixa de fronteira)."
             ),
             "parameters": {
                 "type": "object",

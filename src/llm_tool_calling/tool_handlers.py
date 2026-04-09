@@ -162,10 +162,42 @@ def _overpass_post(full_query: str, timeout: int = 25) -> dict | None:
 
 
 def _overpass_query(query: str, timeout: int = 25) -> list[dict] | None:
-    """Execute Overpass API query. Returns list of elements or None."""
-    full_query = f"[out:json][timeout:{timeout}];{query}out center;"
+    """Execute Overpass API query. Returns list of elements or None.
+
+    Uses ``out geom`` so that ways/relations include full coordinate geometry
+    instead of just the centroid.
+    """
+    full_query = f"[out:json][timeout:{timeout}];{query}out geom;"
     result = _overpass_post(full_query, timeout)
     return result.get("elements", []) if result else None
+
+
+def _parse_overpass_geometry(el: dict) -> dict | None:
+    """Extract GeoJSON geometry from an Overpass element.
+
+    - Nodes → Point
+    - Ways with ``geometry`` key (from ``out geom``) → LineString or Polygon
+    - Falls back to center coordinates if available.
+    """
+    el_type = el.get("type")
+    if el_type == "node":
+        lat, lon = el.get("lat"), el.get("lon")
+        if lat is not None and lon is not None:
+            return {"type": "Point", "coordinates": [round(lon, 6), round(lat, 6)]}
+    elif el_type == "way" and "geometry" in el:
+        coords = [[round(pt["lon"], 6), round(pt["lat"], 6)] for pt in el["geometry"]]
+        if len(coords) >= 2:
+            # Closed way → Polygon, open way → LineString
+            if coords[0] == coords[-1] and len(coords) >= 4:
+                return {"type": "Polygon", "coordinates": [coords]}
+            return {"type": "LineString", "coordinates": coords}
+    # Fallback: center (for relations or ways without full geom)
+    center = el.get("center", {})
+    lat = center.get("lat") or el.get("lat")
+    lon = center.get("lon") or el.get("lon")
+    if lat is not None and lon is not None:
+        return {"type": "Point", "coordinates": [round(lon, 6), round(lat, 6)]}
+    return None
 
 
 def _overpass_features_in_bbox(tipo: str, bbox: tuple[float, float, float, float],
@@ -185,16 +217,12 @@ def _overpass_features_in_bbox(tipo: str, bbox: tuple[float, float, float, float
         return None
     features = []
     for el in elements[:limit]:
-        lat = el.get("lat") or el.get("center", {}).get("lat")
-        lon = el.get("lon") or el.get("center", {}).get("lon")
-        if lat is None or lon is None:
+        geometry = _parse_overpass_geometry(el)
+        if geometry is None:
             continue
         tags_data = el.get("tags", {})
         nome = tags_data.get("name", tags_data.get("ref", f"{tipo}_{el['id']}"))
-        feat = {
-            "nome": nome,
-            "geometry": {"type": "Point", "coordinates": [round(lon, 6), round(lat, 6)]},
-        }
+        feat = {"nome": nome, "geometry": geometry}
         if tags_data.get("height"):
             try:
                 feat["altura_m"] = float(tags_data["height"].replace("m", "").strip())
@@ -224,6 +252,72 @@ def _overpass_features_in_bbox(tipo: str, bbox: tuple[float, float, float, float
     return features
 
 
+def _merge_way_segments(segments: list[list[list[float]]]) -> list[list[float]]:
+    """Merge ordered way segments into a single coordinate list.
+
+    Overpass returns multiple way elements for a single river/road, but they
+    may arrive in arbitrary order. This function chains them by matching
+    endpoints (last coord of one segment ≈ first coord of the next) using a
+    greedy nearest-endpoint approach.
+    """
+    if not segments:
+        return []
+    if len(segments) == 1:
+        return segments[0]
+
+    remaining = list(segments)
+    merged = remaining.pop(0)
+
+    while remaining:
+        head = merged[0]
+        tail = merged[-1]
+        best_idx = None
+        best_dist = float("inf")
+        best_flip = False
+        best_end = "tail"  # append to tail or prepend to head
+
+        for i, seg in enumerate(remaining):
+            if not seg:
+                continue
+            seg_start = seg[0]
+            seg_end = seg[-1]
+            # tail → seg_start (natural append)
+            d = (tail[0] - seg_start[0]) ** 2 + (tail[1] - seg_start[1]) ** 2
+            if d < best_dist:
+                best_dist, best_idx, best_flip, best_end = d, i, False, "tail"
+            # tail → seg_end (reversed append)
+            d = (tail[0] - seg_end[0]) ** 2 + (tail[1] - seg_end[1]) ** 2
+            if d < best_dist:
+                best_dist, best_idx, best_flip, best_end = d, i, True, "tail"
+            # head → seg_end (natural prepend)
+            d = (head[0] - seg_end[0]) ** 2 + (head[1] - seg_end[1]) ** 2
+            if d < best_dist:
+                best_dist, best_idx, best_flip, best_end = d, i, False, "head"
+            # head → seg_start (reversed prepend)
+            d = (head[0] - seg_start[0]) ** 2 + (head[1] - seg_start[1]) ** 2
+            if d < best_dist:
+                best_dist, best_idx, best_flip, best_end = d, i, True, "head"
+
+        if best_idx is None:
+            break
+        seg = remaining.pop(best_idx)
+        if best_flip:
+            seg = list(reversed(seg))
+        if best_end == "tail":
+            # skip duplicate junction point
+            if merged[-1] == seg[0]:
+                merged.extend(seg[1:])
+            else:
+                merged.extend(seg)
+        else:
+            if seg[-1] == merged[0]:
+                merged = seg[:-1] + merged
+            else:
+                merged = seg + merged
+
+    return merged
+
+
 def _overpass_hydrography(nome: str) -> dict | None:
     """Search hydrography by name via Overpass with full geometry. Returns dict or None."""
     escaped = nome.replace('"', '\\"')
@@ -241,25 +335,27 @@ def _overpass_hydrography(nome: str) -> dict | None:
     elements = result.get("elements", [])
     if not elements:
         return None
-    all_coords = []
+    segments = []
     tags = elements[0].get("tags", {})
     for el in elements:
         if el.get("geometry"):
             coords = [[p["lon"], p["lat"]] for p in el["geometry"]]
-            all_coords.extend(coords)
+            if len(coords) >= 2:
+                segments.append(coords)
         elif el.get("members"):
             for member in el["members"]:
                 if member.get("geometry"):
                     coords = [[p["lon"], p["lat"]] for p in member["geometry"]]
-                    all_coords.extend(coords)
+                    if len(coords) >= 2:
+                        segments.append(coords)
     tipo_map = {"river": "rio", "stream": "arroio", "canal": "canal", "lake": "lago",
                 "reservoir": "reservatorio"}
     ww = tags.get("waterway", tags.get("natural", ""))
     tipo = tipo_map.get(ww, ww)
-    if all_coords:
-        geom = {"type": "LineString", "coordinates": all_coords}
-    else:
+    merged = _merge_way_segments(segments)
+    if not merged:
         return None
+    geom = {"type": "LineString", "coordinates": merged}
     return {"nome": tags.get("name", nome), "tipo": tipo, "geometry": geom}
 
 
@@ -284,7 +380,7 @@ def _overpass_road(identificador: str) -> dict | None:
     elements = result.get("elements", [])
     if not elements:
         return None
-    all_coords = []
+    segments = []
     ref_tag = ref_clean
     road_name = None
     for el in elements:
@@ -295,11 +391,13 @@ def _overpass_road(identificador: str) -> dict | None:
             ref_tag = el_tags["ref"]
         if el.get("geometry"):
             coords = [[p["lon"], p["lat"]] for p in el["geometry"]]
-            all_coords.extend(coords)
-    if not all_coords:
+            if len(coords) >= 2:
+                segments.append(coords)
+    merged = _merge_way_segments(segments)
+    if not merged:
         return None
     nome = f"Rodovia {ref_tag}"
-    geom = {"type": "LineString", "coordinates": all_coords}
+    geom = {"type": "LineString", "coordinates": merged}
     extensao_km = geo.length_km(geom)
     return {
         "nome": nome,
