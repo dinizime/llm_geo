@@ -1,6 +1,6 @@
-"""Tool definitions (JSON schema) sent to the LLM."""
+"""Definições de tools (JSON schema) enviadas ao LLM."""
 
-# ── Closed sets used as enums ──────────────────────────────────
+# ── Conjuntos fechados usados como enums ─────────────────────
 FEATURE_TYPES = [
     "ponte", "tunel", "estacao_ferroviaria", "travessia_balsa",
     "torre_comunicacao", "aerogerador", "linha_transmissao", "chamine_industrial",
@@ -20,24 +20,24 @@ FILTER_OPERATORS = [">", "<", ">=", "<=", "=", "in"]
 
 TOOLS = [
     # ═══════════════════════════════════════════════════════════════
-    # 1. GEOGRAPHIC LOOKUPS — resolve names/coordinates to geometry_ref
+    # 1. BUSCAS GEOGRÁFICAS — resolver nomes/coordenadas em geometry_ref
     # ═══════════════════════════════════════════════════════════════
     {
         "type": "function",
         "function": {
             "name": "geocode",
             "description": (
-                "Resolve a place name, address, or POI into coordinates and geometry_ref. "
-                "Use when the user mentions a specific place (city, landmark, POI). "
-                "Do NOT use for municipalities — use search_municipality instead. "
-                "Do NOT use when the user gives raw lat/lon — use create_point instead."
+                "Resolve um nome de lugar, endereço ou POI em coordenadas e geometry_ref. "
+                "Use quando o usuário menciona um lugar específico (cidade, ponto de interesse). "
+                "NÃO use para municípios — use search_municipality. "
+                "NÃO use quando o usuário fornece lat/lon — use create_point."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "place_name": {
                         "type": "string",
-                        "description": "Place name. Include state when possible. E.g. 'Usina de Itaipu', 'Alecrim, RS'",
+                        "description": "Nome do lugar. Inclua o estado quando possível. Ex: 'Usina de Itaipu', 'Alecrim, RS'",
                     }
                 },
                 "required": ["place_name"],
@@ -50,16 +50,16 @@ TOOLS = [
         "function": {
             "name": "create_point",
             "description": (
-                "Creates a point geometry from raw lat/lon coordinates. Returns geometry_ref. "
-                "Use ONLY when the user provides explicit numeric coordinates. "
-                "Do NOT use when the user gives a place name — use geocode instead."
+                "Cria uma geometria de ponto a partir de coordenadas lat/lon. Retorna geometry_ref. "
+                "Use APENAS quando o usuário fornece coordenadas numéricas explícitas. "
+                "NÃO use quando o usuário dá um nome de lugar — use geocode."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "lat": {"type": "number", "description": "Latitude (e.g. -29.78)"},
-                    "lon": {"type": "number", "description": "Longitude (e.g. -55.79)"},
-                    "label": {"type": "string", "description": "Optional label for this point"},
+                    "lat": {"type": "number", "description": "Latitude (ex: -29.78)"},
+                    "lon": {"type": "number", "description": "Longitude (ex: -55.79)"},
+                    "label": {"type": "string", "description": "Rótulo opcional para o ponto"},
                 },
                 "required": ["lat", "lon"],
                 "additionalProperties": False,
@@ -71,16 +71,16 @@ TOOLS = [
         "function": {
             "name": "reverse_geocode",
             "description": (
-                "Determines which municipality a coordinate falls in. "
-                "Returns municipio, uf, estado. "
-                "Use when you have coordinates and need to know the municipality name."
+                "Determina em qual município uma coordenada se encontra. "
+                "Retorna municipio, uf, estado. "
+                "Use quando você tem coordenadas e precisa saber o nome do município."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "lat": {"type": "number", "description": "Latitude"},
                     "lon": {"type": "number", "description": "Longitude"},
-                    "geometry_ref": {"type": "string", "description": "Point geometry_ref (alternative to lat/lon)"},
+                    "geometry_ref": {"type": "string", "description": "geometry_ref de ponto (alternativa a lat/lon)"},
                 },
                 "additionalProperties": False,
             },
@@ -91,17 +91,16 @@ TOOLS = [
         "function": {
             "name": "search_municipality",
             "description": (
-                "Returns the polygon, population, and IBGE code of a Brazilian municipality. "
-                "Use for any question about a specific municipality (area, products, features in it). "
-                "If the name is ambiguous (e.g. 'Santa Cruz'), returns candidate list with uf — "
-                "pick the most likely candidate and call again with uf to get the geometry_ref, "
-                "then continue with the next tool in the chain (e.g. search_products)."
+                "Retorna o polígono, população, área e código IBGE de um município brasileiro. "
+                "Use para qualquer pergunta sobre um município específico (área, produtos, feições). "
+                "Se o nome for ambíguo (ex: 'Santa Cruz'), retorna lista de candidatos com uf — "
+                "escolha o mais provável e chame novamente com uf para obter o geometry_ref."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "nome": {"type": "string", "description": "Municipality name (e.g. 'Alegrete')"},
-                    "uf": {"type": "string", "description": "State abbreviation to disambiguate (e.g. 'RS')"},
+                    "nome": {"type": "string", "description": "Nome do município (ex: 'Alegrete')"},
+                    "uf": {"type": "string", "description": "Sigla do estado para desambiguação (ex: 'RS')"},
                 },
                 "required": ["nome"],
                 "additionalProperties": False,
@@ -112,11 +111,11 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "search_state",
-            "description": "Returns the polygon of a Brazilian state. Use for state-level queries.",
+            "description": "Retorna o polígono e área de um estado brasileiro. Use para consultas em nível estadual.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "uf": {"type": "string", "description": "State abbreviation (e.g. 'RS', 'SP')"},
+                    "uf": {"type": "string", "description": "Sigla do estado (ex: 'RS', 'SP')"},
                 },
                 "required": ["uf"],
                 "additionalProperties": False,
@@ -128,14 +127,14 @@ TOOLS = [
         "function": {
             "name": "search_named_region",
             "description": (
-                "Returns geometry of informal/geographic regions that are NOT administrative divisions. "
-                "Examples: Serra Gaúcha, Pantanal, Litoral Norte, Vale do Taquari, Amazônia Legal. "
-                "Do NOT use for municipalities or states — use search_municipality or search_state."
+                "Retorna a geometria de regiões informais/geográficas que NÃO são divisões administrativas. "
+                "Exemplos: Serra Gaúcha, Pantanal, Litoral Norte, Vale do Taquari, Amazônia Legal. "
+                "NÃO use para municípios ou estados — use search_municipality ou search_state."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "nome": {"type": "string", "description": "Region name"},
+                    "nome": {"type": "string", "description": "Nome da região"},
                 },
                 "required": ["nome"],
                 "additionalProperties": False,
@@ -147,19 +146,19 @@ TOOLS = [
         "function": {
             "name": "search_hydrography",
             "description": (
-                "Search rivers, lakes, lagoons, or basins by name. Returns geometry_ref (LineString or Polygon). "
-                "Use for any question involving water bodies."
+                "Busca rios, lagos, lagoas ou bacias por nome. Retorna geometry_ref (LineString ou Polygon) e length_km. "
+                "Use para qualquer pergunta envolvendo corpos d'água."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "nome": {"type": "string", "description": "Waterbody name (e.g. 'Rio Uruguai')"},
+                    "nome": {"type": "string", "description": "Nome do corpo d'água (ex: 'Rio Uruguai')"},
                     "tipo": {
                         "type": "string",
                         "enum": ["rio", "lago", "lagoa", "bacia"],
-                        "description": "Type of water body (optional)",
+                        "description": "Tipo de corpo d'água (opcional)",
                     },
-                    "uf": {"type": "string", "description": "Filter by state (optional)"},
+                    "uf": {"type": "string", "description": "Filtrar por estado (opcional)"},
                 },
                 "required": ["nome"],
                 "additionalProperties": False,
@@ -171,15 +170,15 @@ TOOLS = [
         "function": {
             "name": "search_border",
             "description": (
-                "Returns the international border of Brazil with a neighbor country (LineString). "
-                "Use for questions about borders, border regions, or faixa de fronteira."
+                "Retorna a fronteira internacional do Brasil com um país vizinho (LineString) e length_km. "
+                "Use para perguntas sobre fronteiras, regiões fronteiriças ou faixa de fronteira."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "pais": {"type": "string", "description": "Neighbor country name (e.g. 'Argentina', 'Uruguai')"},
-                    "proximidade_ref": {"type": "string", "description": "geometry_ref of point to filter nearby segment"},
-                    "raio_m": {"type": "number", "description": "Radius in meters for clipping near the point"},
+                    "pais": {"type": "string", "description": "Nome do país vizinho (ex: 'Argentina', 'Uruguai')"},
+                    "proximidade_ref": {"type": "string", "description": "geometry_ref de ponto para filtrar trecho próximo"},
+                    "raio_m": {"type": "number", "description": "Raio em metros para recorte próximo ao ponto"},
                 },
                 "required": ["pais"],
                 "additionalProperties": False,
@@ -191,14 +190,14 @@ TOOLS = [
         "function": {
             "name": "search_road",
             "description": (
-                "Search a highway/road by its official code. Returns geometry_ref (LineString) and extensao_km. "
-                "Use for questions about highways. Accepts BR or state codes: BR-101, BR-116, BR-290, RS-040."
+                "Busca uma rodovia pelo código oficial. Retorna geometry_ref (LineString) e extensao_km. "
+                "Use para perguntas sobre rodovias. Aceita códigos BR ou estaduais: BR-101, BR-116, BR-290, RS-040."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "identificador": {"type": "string", "description": "Road code (e.g. 'BR-116', 'RS-040')"},
-                    "uf": {"type": "string", "description": "State to filter segment (optional)"},
+                    "identificador": {"type": "string", "description": "Código da rodovia (ex: 'BR-116', 'RS-040')"},
+                    "uf": {"type": "string", "description": "Estado para filtrar trecho (opcional)"},
                 },
                 "required": ["identificador"],
                 "additionalProperties": False,
@@ -210,16 +209,16 @@ TOOLS = [
         "function": {
             "name": "search_military_installation",
             "description": (
-                "Search military installations by name, abbreviation, or variant. "
-                "Understands abbreviations: Bda=Brigada, B=Batalhão, Cia=Companhia, "
+                "Busca instalações militares por nome, sigla ou variante. "
+                "Entende abreviações: Bda=Brigada, B=Batalhão, Cia=Companhia, "
                 "Inf=Infantaria, Mec=Mecanizada, Eng=Engenharia. "
-                "Returns nome_completo, sigla, cidade, uf, geometry_ref."
+                "Retorna nome_completo, sigla, cidade, uf, geometry_ref."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "nome_ou_sigla": {"type": "string", "description": "Name or abbreviation (e.g. '8ª Bda Inf Mec')"},
-                    "cidade": {"type": "string", "description": "City for disambiguation (optional)"},
+                    "nome_ou_sigla": {"type": "string", "description": "Nome ou sigla (ex: '8ª Bda Inf Mec')"},
+                    "cidade": {"type": "string", "description": "Cidade para desambiguação (opcional)"},
                 },
                 "required": ["nome_ou_sigla"],
                 "additionalProperties": False,
@@ -228,18 +227,18 @@ TOOLS = [
     },
 
     # ═══════════════════════════════════════════════════════════════
-    # 2. FEATURE SEARCH — find geographic features within areas/routes
+    # 2. BUSCA DE FEIÇÕES — encontrar feições geográficas em áreas
     # ═══════════════════════════════════════════════════════════════
     {
         "type": "function",
         "function": {
             "name": "search_features",
             "description": (
-                "Search geographic features of a specific type WITHIN an area (polygon or buffer). "
-                "Returns list of features with attributes and geometry_ref. "
-                "Use for: 'quantas pontes em Alegrete', 'torres de comunicação no RS'. "
-                "Do NOT use for 'features along a route/road' — use features_along_route instead. "
-                "Do NOT use for 'nearest X from Y' — use find_nearest instead."
+                "Busca feições geográficas de um tipo específico DENTRO de uma área (polígono ou buffer). "
+                "Retorna lista de feições com atributos e geometry_ref. "
+                "Use para: 'quantas pontes em Alegrete', 'torres de comunicação no RS'. "
+                "Para feições ao longo de rota/rodovia: primeiro use buffer na rota, depois search_features no buffer. "
+                "NÃO use para 'mais próximo de X' — use find_nearest."
             ),
             "parameters": {
                 "type": "object",
@@ -247,19 +246,19 @@ TOOLS = [
                     "tipo": {
                         "type": "string",
                         "enum": FEATURE_TYPES,
-                        "description": "Feature type to search",
+                        "description": "Tipo de feição a buscar",
                     },
-                    "geometry_ref": {"type": "string", "description": "Search area geometry_ref (polygon from search_municipality, buffer, etc.)"},
+                    "geometry_ref": {"type": "string", "description": "geometry_ref da área de busca (polígono de search_municipality, buffer, etc.)"},
                     "atributo": {
                         "type": "string",
-                        "description": "Attribute to filter (e.g. 'altura_m', 'comprimento_m', 'leitos', 'pista_m', 'capacidade_ton', 'potencia_mw')",
+                        "description": "Atributo para filtrar (ex: 'altura_m', 'comprimento_m', 'leitos', 'pista_m', 'capacidade_ton', 'potencia_mw')",
                     },
                     "operador": {
                         "type": "string",
                         "enum": FILTER_OPERATORS,
-                        "description": "Comparison operator for attribute filter",
+                        "description": "Operador de comparação para filtro de atributo",
                     },
-                    "valor": {"description": "Value to compare (number for scalar ops, list for 'in')"},
+                    "valor": {"description": "Valor para comparar (número para operadores escalares, lista para 'in')"},
                 },
                 "required": ["tipo", "geometry_ref"],
                 "additionalProperties": False,
@@ -271,10 +270,10 @@ TOOLS = [
         "function": {
             "name": "find_nearest",
             "description": (
-                "Finds the N nearest features of a given type from a reference point. "
-                "Returns features sorted by distance_km. "
-                "Use for: 'hospital mais próximo', 'aeroporto mais perto de X'. "
-                "Do NOT use for counting features in an area — use search_features instead."
+                "Encontra as N feições mais próximas de um tipo a partir de um ponto de referência. "
+                "Retorna feições ordenadas por distance_km. "
+                "Use para: 'hospital mais próximo', 'aeroporto mais perto de X'. "
+                "NÃO use para contar feições em uma área — use search_features."
             ),
             "parameters": {
                 "type": "object",
@@ -282,61 +281,33 @@ TOOLS = [
                     "tipo": {
                         "type": "string",
                         "enum": FEATURE_TYPES,
-                        "description": "Feature type to search for",
+                        "description": "Tipo de feição a buscar",
                     },
-                    "geometry_ref": {"type": "string", "description": "Reference point geometry_ref"},
-                    "limit": {"type": "integer", "description": "Max results (default 3)"},
+                    "geometry_ref": {"type": "string", "description": "geometry_ref do ponto de referência"},
+                    "limit": {"type": "integer", "description": "Máximo de resultados (padrão 3)"},
                 },
                 "required": ["tipo", "geometry_ref"],
                 "additionalProperties": False,
             },
         },
     },
-    {
-        "type": "function",
-        "function": {
-            "name": "features_along_route",
-            "description": (
-                "Lists features along a route or road (LineString). "
-                "Applies an implicit buffer corridor and returns features ordered by position. "
-                "Use for: 'pontes na rota entre A e B', 'postos ao longo da BR-290'. "
-                "Requires geometry_ref from compute_route or search_road. "
-                "Do NOT use buffer + search_features manually — this tool does it automatically."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "tipo": {
-                        "type": "string",
-                        "enum": FEATURE_TYPES,
-                        "description": "Feature type (e.g. ponte, hospital, posto_combustivel)",
-                    },
-                    "geometry_ref": {"type": "string", "description": "LineString geometry_ref (from compute_route or search_road)"},
-                    "buffer_metros": {"type": "number", "description": "Corridor width in meters (default 500)"},
-                },
-                "required": ["tipo", "geometry_ref"],
-                "additionalProperties": False,
-            },
-        },
-    },
-
     # ═══════════════════════════════════════════════════════════════
-    # 3. SPATIAL OPERATIONS — buffer, intersect, route, predicates
+    # 3. OPERAÇÕES ESPACIAIS — buffer, interseção, rota, predicados
     # ═══════════════════════════════════════════════════════════════
     {
         "type": "function",
         "function": {
             "name": "buffer",
             "description": (
-                "Creates a circular buffer zone (polygon) around any geometry. Returns geometry_ref. "
-                "Use to create search areas around points, routes, or borders. "
-                "Typical radii: 5000m (local), 20000m (regional), 150000m (faixa de fronteira)."
+                "Cria uma zona de buffer circular (polígono) ao redor de qualquer geometria. Retorna geometry_ref e area_km2. "
+                "Use para criar áreas de busca ao redor de pontos, rotas ou fronteiras. "
+                "Raios típicos: 5000m (local), 20000m (regional), 150000m (faixa de fronteira)."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "geometry_ref": {"type": "string", "description": "Center geometry reference"},
-                    "raio_metros": {"type": "number", "description": "Buffer radius in meters"},
+                    "geometry_ref": {"type": "string", "description": "Referência da geometria central"},
+                    "raio_metros": {"type": "number", "description": "Raio do buffer em metros"},
                 },
                 "required": ["geometry_ref", "raio_metros"],
                 "additionalProperties": False,
@@ -348,14 +319,14 @@ TOOLS = [
         "function": {
             "name": "intersect",
             "description": (
-                "Computes the geometric intersection of two geometries. Returns geometry_ref and area_km2. "
-                "Use when you need the overlapping area between two regions."
+                "Calcula a interseção geométrica de duas geometrias. Retorna geometry_ref e area_km2. "
+                "Use quando precisar da área de sobreposição entre duas regiões."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "geometry_ref_a": {"type": "string", "description": "First geometry"},
-                    "geometry_ref_b": {"type": "string", "description": "Second geometry"},
+                    "geometry_ref_a": {"type": "string", "description": "Primeira geometria"},
+                    "geometry_ref_b": {"type": "string", "description": "Segunda geometria"},
                 },
                 "required": ["geometry_ref_a", "geometry_ref_b"],
                 "additionalProperties": False,
@@ -367,15 +338,15 @@ TOOLS = [
         "function": {
             "name": "compute_route",
             "description": (
-                "Computes a road route between two points. Returns distance_km, duration_min, geometry_ref (LineString). "
-                "Use for road distance and travel time between places. "
-                "Do NOT use for straight-line distance — use compute_distance instead."
+                "Calcula uma rota rodoviária entre dois pontos. Retorna distance_km, duration_min, length_km, geometry_ref (LineString). "
+                "Use para distância por estrada e tempo de viagem entre lugares. "
+                "NÃO use para distância em linha reta — use compute_distance."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "origin_ref": {"type": "string", "description": "geometry_ref of origin point"},
-                    "dest_ref": {"type": "string", "description": "geometry_ref of destination point"},
+                    "origin_ref": {"type": "string", "description": "geometry_ref do ponto de origem"},
+                    "dest_ref": {"type": "string", "description": "geometry_ref do ponto de destino"},
                 },
                 "required": ["origin_ref", "dest_ref"],
                 "additionalProperties": False,
@@ -385,36 +356,19 @@ TOOLS = [
     {
         "type": "function",
         "function": {
-            "name": "check_intersection",
+            "name": "check_spatial_relation",
             "description": (
-                "Checks whether two geometries intersect (returns boolean). "
-                "Use for: 'a rota passa por X?', 'o rio cruza o município?'. "
-                "Do NOT use intersect (which computes the overlap geometry) — this just returns true/false."
+                "Verifica relações espaciais entre duas geometrias. Retorna três booleanos: "
+                "intersects (qualquer sobreposição), a_contains_b (A contém totalmente B), b_contains_a (B contém totalmente A). "
+                "Use para: 'a rota passa por X?', 'o rio cruza o município?', "
+                "'ponto X está dentro de Y?', 'o estado contém essa região?'. "
+                "NÃO use intersect (que calcula a geometria de sobreposição) — esta tool só retorna booleanos."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "geometry_ref_a": {"type": "string", "description": "First geometry"},
-                    "geometry_ref_b": {"type": "string", "description": "Second geometry"},
-                },
-                "required": ["geometry_ref_a", "geometry_ref_b"],
-                "additionalProperties": False,
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "check_contains",
-            "description": (
-                "Checks whether geometry A fully contains geometry B (returns boolean). "
-                "Use for: 'ponto X está dentro do município Y?', 'estado contém essa região?'."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "geometry_ref_a": {"type": "string", "description": "Container geometry (the larger one)"},
-                    "geometry_ref_b": {"type": "string", "description": "Candidate geometry (must be fully inside A)"},
+                    "geometry_ref_a": {"type": "string", "description": "Primeira geometria"},
+                    "geometry_ref_b": {"type": "string", "description": "Segunda geometria"},
                 },
                 "required": ["geometry_ref_a", "geometry_ref_b"],
                 "additionalProperties": False,
@@ -423,22 +377,22 @@ TOOLS = [
     },
 
     # ═══════════════════════════════════════════════════════════════
-    # 4. MEASUREMENT — distance, area, length
+    # 4. MEDIÇÕES — distância, área, comprimento
     # ═══════════════════════════════════════════════════════════════
     {
         "type": "function",
         "function": {
             "name": "compute_distance",
             "description": (
-                "Computes the straight-line (geodesic) distance between two geometries in km. "
-                "Use for 'how far is X from Y' in straight-line terms. "
-                "Do NOT use for road distance — use compute_route instead."
+                "Calcula a distância em linha reta (geodésica) entre duas geometrias em km. "
+                "Use para 'qual a distância de X a Y' em linha reta. "
+                "NÃO use para distância por estrada — use compute_route."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "geometry_ref_a": {"type": "string", "description": "First geometry reference"},
-                    "geometry_ref_b": {"type": "string", "description": "Second geometry reference"},
+                    "geometry_ref_a": {"type": "string", "description": "Referência da primeira geometria"},
+                    "geometry_ref_b": {"type": "string", "description": "Referência da segunda geometria"},
                 },
                 "required": ["geometry_ref_a", "geometry_ref_b"],
                 "additionalProperties": False,
@@ -450,13 +404,13 @@ TOOLS = [
         "function": {
             "name": "compute_area",
             "description": (
-                "Computes the area of a polygon in km². "
-                "Use for: 'área do município X', 'tamanho da zona de buffer'."
+                "Calcula a área de um polígono em km². "
+                "Use para: 'área do município X', 'tamanho da zona de buffer'."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "geometry_ref": {"type": "string", "description": "Polygon geometry reference"},
+                    "geometry_ref": {"type": "string", "description": "Referência da geometria do polígono"},
                 },
                 "required": ["geometry_ref"],
                 "additionalProperties": False,
@@ -468,13 +422,13 @@ TOOLS = [
         "function": {
             "name": "compute_length",
             "description": (
-                "Computes the length of a line geometry (route, river, border) in km. "
-                "Use for: 'comprimento da rota', 'extensão do rio', 'tamanho da fronteira'."
+                "Calcula o comprimento de uma geometria de linha (rota, rio, fronteira) em km. "
+                "Use para: 'comprimento da rota', 'extensão do rio', 'tamanho da fronteira'."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "geometry_ref": {"type": "string", "description": "LineString geometry reference"},
+                    "geometry_ref": {"type": "string", "description": "Referência da geometria LineString"},
                 },
                 "required": ["geometry_ref"],
                 "additionalProperties": False,
@@ -483,30 +437,30 @@ TOOLS = [
     },
 
     # ═══════════════════════════════════════════════════════════════
-    # 5. PRODUCT CATALOG — search geospatial products
+    # 5. CATÁLOGO DE PRODUTOS — buscar produtos geoespaciais
     # ═══════════════════════════════════════════════════════════════
     {
         "type": "function",
         "function": {
             "name": "search_products",
             "description": (
-                "Search geospatial products in the catalog. Main product search tool. "
-                "Requires geometry_ref from a previous tool (search_municipality, buffer, etc.). "
-                "Returns products with escala, data_produto, articulacao, nome. "
-                "Analyze results to find 'melhor escala' or 'mais recente'."
+                "Busca produtos geoespaciais no catálogo. Ferramenta principal de busca de produtos. "
+                "Requer geometry_ref de uma tool anterior (search_municipality, buffer, etc.). "
+                "Retorna produtos com escala, data_produto, articulacao, nome. "
+                "Analise os resultados para encontrar 'melhor escala' ou 'mais recente'."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "geometry_ref": {"type": "string", "description": "Search area geometry_ref"},
+                    "geometry_ref": {"type": "string", "description": "geometry_ref da área de busca"},
                     "tipo": {
                         "type": "string",
-                        "description": "Product type, or '*' for all types",
+                        "description": "Tipo de produto, ou '*' para todos",
                         "enum": PRODUCT_TYPES + ["*"],
                     },
-                    "escala": {"type": "integer", "description": "Scale denominator filter (e.g. 25000 for 1:25,000)"},
-                    "data_inicio": {"type": "string", "description": "Start date filter YYYY-MM-DD"},
-                    "data_fim": {"type": "string", "description": "End date filter YYYY-MM-DD"},
+                    "escala": {"type": "integer", "description": "Filtro de denominador de escala (ex: 25000 para 1:25.000)"},
+                    "data_inicio": {"type": "string", "description": "Filtro de data inicial AAAA-MM-DD"},
+                    "data_fim": {"type": "string", "description": "Filtro de data final AAAA-MM-DD"},
                 },
                 "required": ["geometry_ref"],
                 "additionalProperties": False,
@@ -518,14 +472,14 @@ TOOLS = [
         "function": {
             "name": "search_by_articulation",
             "description": (
-                "Search geospatial products by map sheet articulation code (MI or INOM). "
-                "Use when the user provides an articulation code like 'SH-22-V-C-IV-1'. "
-                "Do NOT use for geographic searches — use search_products instead."
+                "Busca produtos geoespaciais pelo código de articulação da folha (MI ou INOM). "
+                "Use quando o usuário fornece um código de articulação como 'SH-22-V-C-IV-1'. "
+                "NÃO use para buscas geográficas — use search_products."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "codigo": {"type": "string", "description": "Articulation code (e.g. 'SH-22-V-C-IV-1')"},
+                    "codigo": {"type": "string", "description": "Código de articulação (ex: 'SH-22-V-C-IV-1')"},
                 },
                 "required": ["codigo"],
                 "additionalProperties": False,
@@ -534,20 +488,20 @@ TOOLS = [
     },
 
     # ═══════════════════════════════════════════════════════════════
-    # 6. SPATIAL QUERIES — municipalities, neighbors
+    # 6. CONSULTAS ESPACIAIS — municípios, vizinhos
     # ═══════════════════════════════════════════════════════════════
     {
         "type": "function",
         "function": {
             "name": "list_municipalities_in",
             "description": (
-                "Lists all municipalities that intersect a given geometry. "
-                "Use for: 'municípios ao longo da rota', 'cidades num raio de 50km'."
+                "Lista todos os municípios que intersectam uma geometria. "
+                "Use para: 'municípios ao longo da rota', 'cidades num raio de 50km'."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "geometry_ref": {"type": "string", "description": "Area or line geometry_ref"},
+                    "geometry_ref": {"type": "string", "description": "geometry_ref da área ou linha"},
                 },
                 "required": ["geometry_ref"],
                 "additionalProperties": False,
@@ -559,14 +513,14 @@ TOOLS = [
         "function": {
             "name": "get_neighbors",
             "description": (
-                "Returns municipalities that border a given municipality. "
-                "Use for: 'municípios vizinhos de Alegrete', 'quem faz divisa com Santa Maria'. "
-                "Requires geometry_ref of a municipality (from search_municipality)."
+                "Retorna os municípios que fazem divisa com um município. "
+                "Use para: 'municípios vizinhos de Alegrete', 'quem faz divisa com Santa Maria'. "
+                "Requer geometry_ref de um município (de search_municipality)."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "geometry_ref": {"type": "string", "description": "Municipality polygon geometry_ref"},
+                    "geometry_ref": {"type": "string", "description": "geometry_ref do polígono do município"},
                 },
                 "required": ["geometry_ref"],
                 "additionalProperties": False,
@@ -575,21 +529,21 @@ TOOLS = [
     },
 
     # ═══════════════════════════════════════════════════════════════
-    # 7. ELEVATION & TERRAIN
+    # 7. ELEVAÇÃO E TERRENO
     # ═══════════════════════════════════════════════════════════════
     {
         "type": "function",
         "function": {
             "name": "get_elevation",
             "description": (
-                "Returns elevation of a point (elevation_m) or elevation range of a polygon "
+                "Retorna a elevação de um ponto (elevation_m) ou faixa de elevação de um polígono "
                 "(min_elevation_m, max_elevation_m, avg_elevation_m). "
-                "Use for: 'altitude de Alegrete', 'elevação na coordenada X'."
+                "Use para: 'altitude de Alegrete', 'elevação na coordenada X'."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "geometry_ref": {"type": "string", "description": "Point or Polygon geometry_ref"},
+                    "geometry_ref": {"type": "string", "description": "geometry_ref de Ponto ou Polígono"},
                 },
                 "required": ["geometry_ref"],
                 "additionalProperties": False,
@@ -601,15 +555,15 @@ TOOLS = [
         "function": {
             "name": "get_terrain_profile",
             "description": (
-                "Returns elevation profile along a LineString (route, road, river). "
-                "Samples ~10 points. Returns min_m, max_m, avg_m, max_slope_pct, "
+                "Retorna o perfil de elevação ao longo de uma LineString (rota, rodovia, rio). "
+                "Amostra ~10 pontos. Retorna min_m, max_m, avg_m, max_slope_pct, "
                 "total_ascent_m, total_descent_m, classification (plano/ondulado/montanhoso). "
-                "Use for: 'perfil de elevação da rota', 'terreno é montanhoso?'."
+                "Use para: 'perfil de elevação da rota', 'o terreno é montanhoso?'."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "geometry_ref": {"type": "string", "description": "LineString geometry_ref (from compute_route, search_road, or search_hydrography)"},
+                    "geometry_ref": {"type": "string", "description": "geometry_ref de LineString (de compute_route, search_road ou search_hydrography)"},
                 },
                 "required": ["geometry_ref"],
                 "additionalProperties": False,

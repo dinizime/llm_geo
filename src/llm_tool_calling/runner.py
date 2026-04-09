@@ -57,7 +57,7 @@ def _extract_product_ids(trace: list[dict]) -> set[int]:
 def _extract_feature_names(trace: list[dict]) -> set[str]:
     names = set()
     for step in trace:
-        if step["tool"] in ("search_features", "features_along_route", "find_nearest"):
+        if step["tool"] in ("search_features", "find_nearest"):
             for f in step["result"].get("features") or step["result"].get("nearest") or []:
                 if "nome" in f:
                     names.add(f["nome"])
@@ -67,7 +67,7 @@ def _extract_feature_names(trace: list[dict]) -> set[str]:
 def _extract_feature_counts(trace: list[dict]) -> dict[str, int]:
     counts: dict[str, int] = {}
     for step in trace:
-        if step["tool"] in ("search_features", "features_along_route", "find_nearest"):
+        if step["tool"] in ("search_features", "find_nearest"):
             tipo = step.get("args", {}).get("tipo", "")
             total = step["result"].get("total", 0)
             counts[tipo] = counts.get(tipo, 0) + total
@@ -88,7 +88,7 @@ def _extract_booleans(trace: list[dict]) -> dict[str, bool]:
     values = {}
     for step in trace:
         result = step.get("result", {})
-        for key in ("intersects", "contains"):
+        for key in ("intersects", "a_contains_b", "b_contains_a"):
             if key in result:
                 values[key] = result[key]
     return values
@@ -117,7 +117,7 @@ def evaluate_query(bq: BenchmarkQuery, client: OpenAI, model: str, provider_conf
     TOOL_EQUIVALENCES = {
         "geocode": ["search_municipality"],
         "search_municipality": ["geocode"],
-        "search_features": ["find_nearest", "features_along_route"],
+        "search_features": ["find_nearest"],
         "find_nearest": ["search_features"],
         "compute_distance": ["compute_route"],
         "search_road": ["compute_route"],

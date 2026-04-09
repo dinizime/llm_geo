@@ -18,7 +18,7 @@ class BenchmarkQuery:
     expected_tools: list[str] = field(default_factory=list)
     # Product IDs that MUST be found in search_products trace results
     expected_product_ids: list[int] = field(default_factory=list)
-    # Feature names (substring match) that MUST appear in search_features/find_nearest/features_along_route trace
+    # Feature names (substring match) that MUST appear in search_features/find_nearest trace
     expected_feature_ids: list[str] = field(default_factory=list)
     # Minimum features found by type: {"ponte": 2} means at least 2 pontes found
     min_features: dict[str, int] = field(default_factory=dict)
@@ -536,13 +536,13 @@ BENCHMARK_QUERIES: list[BenchmarkQuery] = [
     BenchmarkQuery(
         id="Q01", category="Planejamento de Rota", difficulty="medium",
         query="Quantas pontes tem na rota entre Alegrete e Rosário do Sul?",
-        expected_tools=["geocode", "compute_route", "features_along_route"],
+        expected_tools=["geocode", "compute_route", "buffer", "search_features"],
         min_features={"ponte": 1},
     ),
     BenchmarkQuery(
         id="Q02", category="Planejamento de Rota", difficulty="hard",
         query="Quais postos de combustível existem ao longo da BR-290?",
-        expected_tools=["search_road", "features_along_route"],
+        expected_tools=["search_road", "buffer", "search_features"],
         min_features={"posto_combustivel": 1},
     ),
     BenchmarkQuery(
@@ -565,12 +565,12 @@ BENCHMARK_QUERIES: list[BenchmarkQuery] = [
     BenchmarkQuery(
         id="Q06", category="Planejamento de Rota", difficulty="hard",
         query="Existe algum hospital ao longo da rota entre Alegrete e Uruguaiana?",
-        expected_tools=["geocode", "compute_route", "features_along_route"],
+        expected_tools=["geocode", "compute_route", "buffer", "search_features"],
     ),
     BenchmarkQuery(
         id="Q07", category="Planejamento de Rota", difficulty="hard",
         query="Quais pontes e túneis existem na rota entre Florianópolis e Porto Alegre?",
-        expected_tools=["geocode", "compute_route", "features_along_route"],
+        expected_tools=["geocode", "compute_route", "buffer", "search_features"],
         min_features={"ponte": 1},
     ),
     BenchmarkQuery(
@@ -581,7 +581,7 @@ BENCHMARK_QUERIES: list[BenchmarkQuery] = [
     BenchmarkQuery(
         id="Q09", category="Planejamento de Rota", difficulty="hard",
         query="Preciso deslocar um comboio de Uruguaiana a Bagé. Quais são as pontes no caminho?",
-        expected_tools=["geocode", "compute_route", "features_along_route"],
+        expected_tools=["geocode", "compute_route", "buffer", "search_features"],
         min_features={"ponte": 1},
     ),
     BenchmarkQuery(
@@ -592,7 +592,7 @@ BENCHMARK_QUERIES: list[BenchmarkQuery] = [
     BenchmarkQuery(
         id="Q11", category="Planejamento de Rota", difficulty="hard",
         query="Planejando deslocamento de tropa de Porto Alegre a Livramento. Qual a extensão da rota e quantas pontes vou cruzar?",
-        expected_tools=["geocode", "compute_route", "features_along_route"],
+        expected_tools=["geocode", "compute_route", "buffer", "search_features"],
         min_features={"ponte": 1},
     ),
     BenchmarkQuery(
@@ -626,7 +626,7 @@ BENCHMARK_QUERIES: list[BenchmarkQuery] = [
     BenchmarkQuery(
         id="R04", category="Identificação de Obstáculos", difficulty="hard",
         query="Linhas de transmissão que cruzam a rota entre Porto Alegre e Caxias do Sul",
-        expected_tools=["geocode", "compute_route", "features_along_route"],
+        expected_tools=["geocode", "compute_route", "buffer", "search_features"],
         min_features={"linha_transmissao": 1},
     ),
     BenchmarkQuery(
@@ -637,7 +637,7 @@ BENCHMARK_QUERIES: list[BenchmarkQuery] = [
     BenchmarkQuery(
         id="R06", category="Identificação de Obstáculos", difficulty="hard",
         query="Para um voo de helicóptero de Santa Maria a Alegrete, quais obstáculos verticais devo considerar?",
-        expected_tools=["geocode", "compute_route", "features_along_route"],
+        expected_tools=["geocode", "compute_route", "buffer", "search_features"],
     ),
     BenchmarkQuery(
         id="R07", category="Identificação de Obstáculos", difficulty="medium",
@@ -803,7 +803,7 @@ BENCHMARK_QUERIES: list[BenchmarkQuery] = [
     BenchmarkQuery(
         id="U05", category="Planejamento de Aviação", difficulty="hard",
         query="Preciso voar de Santa Maria a Alegrete. Quais torres e linhas de transmissão vou encontrar na rota?",
-        expected_tools=["geocode", "compute_route", "features_along_route"],
+        expected_tools=["geocode", "compute_route", "buffer", "search_features"],
         min_features={"torre_comunicacao": 1},
     ),
     BenchmarkQuery(
@@ -834,7 +834,7 @@ BENCHMARK_QUERIES: list[BenchmarkQuery] = [
     BenchmarkQuery(
         id="V02", category="Hidrografia e Terreno", difficulty="hard",
         query="O Rio Ibicuí cruza o município de Alegrete?",
-        expected_tools=["search_hydrography", "search_municipality", "check_intersection"],
+        expected_tools=["search_hydrography", "search_municipality", "check_spatial_relation"],
         expected_boolean={"intersects": True},
     ),
     BenchmarkQuery(
@@ -932,7 +932,7 @@ BENCHMARK_QUERIES: list[BenchmarkQuery] = [
     BenchmarkQuery(
         id="X02", category="Rodovias", difficulty="hard",
         query="Pontes ao longo da BR-290 entre Santa Maria e Uruguaiana",
-        expected_tools=["search_road", "features_along_route"],
+        expected_tools=["search_road", "buffer", "search_features"],
         min_features={"ponte": 1},
     ),
     BenchmarkQuery(
@@ -943,7 +943,7 @@ BENCHMARK_QUERIES: list[BenchmarkQuery] = [
     BenchmarkQuery(
         id="X04", category="Rodovias", difficulty="hard",
         query="Existem estações ferroviárias ao longo da rota entre Porto Alegre e Santa Maria?",
-        expected_tools=["geocode", "compute_route", "features_along_route"],
+        expected_tools=["geocode", "compute_route", "buffer", "search_features"],
     ),
     BenchmarkQuery(
         id="X05", category="Rodovias", difficulty="hard",
@@ -953,13 +953,13 @@ BENCHMARK_QUERIES: list[BenchmarkQuery] = [
     BenchmarkQuery(
         id="X06", category="Rodovias", difficulty="medium",
         query="A RS-040 cruza o município de Viamão?",
-        expected_tools=["search_road", "search_municipality", "check_intersection"],
+        expected_tools=["search_road", "search_municipality", "check_spatial_relation"],
         expected_boolean={"intersects": True},
     ),
     BenchmarkQuery(
         id="X07", category="Rodovias", difficulty="hard",
         query="Linhas de transmissão que cruzam a BR-290 no trecho de Santa Maria a Rosário do Sul",
-        expected_tools=["search_road", "features_along_route"],
+        expected_tools=["search_road", "buffer", "search_features"],
         min_features={"linha_transmissao": 1},
     ),
     BenchmarkQuery(
@@ -991,7 +991,7 @@ BENCHMARK_QUERIES: list[BenchmarkQuery] = [
     BenchmarkQuery(
         id="Y04", category="Militar Avançado", difficulty="hard",
         query="Postos de combustível na rota entre o 3º BECmb e a 8ª Bda Inf Mec",
-        expected_tools=["search_military_installation", "compute_route", "features_along_route"],
+        expected_tools=["search_military_installation", "compute_route", "buffer", "search_features"],
         min_features={"posto_combustivel": 1},
     ),
     BenchmarkQuery(
@@ -1002,7 +1002,7 @@ BENCHMARK_QUERIES: list[BenchmarkQuery] = [
     BenchmarkQuery(
         id="Y06", category="Militar Avançado", difficulty="hard",
         query="Pontes na rota entre Pelotas e Cachoeira do Sul para deslocamento de tropa de engenharia",
-        expected_tools=["geocode", "compute_route", "features_along_route"],
+        expected_tools=["geocode", "compute_route", "buffer", "search_features"],
         min_features={"ponte": 1},
     ),
     BenchmarkQuery(
@@ -1022,13 +1022,13 @@ BENCHMARK_QUERIES: list[BenchmarkQuery] = [
     BenchmarkQuery(
         id="Z01", category="Multi-Step Complexo", difficulty="hard",
         query="Quantas pontes tem na rota entre Alegrete e Rosário do Sul, e qual a mais próxima de Rosário?",
-        expected_tools=["geocode", "compute_route", "features_along_route"],
+        expected_tools=["geocode", "compute_route", "buffer", "search_features"],
         min_features={"ponte": 1},
     ),
     BenchmarkQuery(
         id="Z02", category="Multi-Step Complexo", difficulty="hard",
         query="Quais hospitais ficam a menos de 10km de alguma ponte na rota entre Santa Maria e Alegrete?",
-        expected_tools=["geocode", "compute_route", "features_along_route", "search_features"],
+        expected_tools=["geocode", "compute_route", "buffer", "search_features"],
     ),
     BenchmarkQuery(
         id="Z03", category="Multi-Step Complexo", difficulty="hard",
@@ -1070,7 +1070,7 @@ BENCHMARK_QUERIES: list[BenchmarkQuery] = [
     BenchmarkQuery(
         id="Z10", category="Multi-Step Complexo", difficulty="hard",
         query="Qual a maior ponte na rota entre Porto Alegre e Santa Maria?",
-        expected_tools=["geocode", "compute_route", "features_along_route"],
+        expected_tools=["geocode", "compute_route", "buffer", "search_features"],
         min_features={"ponte": 1},
     ),
 
@@ -1178,7 +1178,7 @@ BENCHMARK_QUERIES: list[BenchmarkQuery] = [
     BenchmarkQuery(
         id="AB08", category="Formulação Natural", difficulty="medium",
         query="de Santa Maria a Alegrete tem alguma ponte?",
-        expected_tools=["geocode", "compute_route", "features_along_route"],
+        expected_tools=["geocode", "compute_route", "buffer", "search_features"],
         min_features={"ponte": 1},
     ),
 
@@ -1214,8 +1214,8 @@ BENCHMARK_QUERIES: list[BenchmarkQuery] = [
     BenchmarkQuery(
         id="AC06", category="Coordenadas", difficulty="medium",
         query="O ponto -30.03, -51.23 está no Rio Grande do Sul?",
-        expected_tools=["create_point", "search_state", "check_contains"],
-        expected_boolean={"contains": True},
+        expected_tools=["create_point", "search_state", "check_spatial_relation"],
+        expected_boolean={"a_contains_b": True},
     ),
 
     # ═══════════════════════════════════════════════════════════════
@@ -1263,32 +1263,32 @@ BENCHMARK_QUERIES: list[BenchmarkQuery] = [
     BenchmarkQuery(
         id="AE01", category="Contenção Espacial", difficulty="medium",
         query="A barragem do DNOS fica dentro do município de Santa Maria?",
-        expected_tools=["search_features", "search_municipality", "check_contains"],
-        expected_boolean={"contains": True},
+        expected_tools=["search_features", "search_municipality", "check_spatial_relation"],
+        expected_boolean={"a_contains_b": True},
     ),
     BenchmarkQuery(
         id="AE02", category="Contenção Espacial", difficulty="medium",
         query="O ponto -30.03, -51.23 está no RS?",
-        expected_tools=["create_point", "search_state", "check_contains"],
-        expected_boolean={"contains": True},
+        expected_tools=["create_point", "search_state", "check_spatial_relation"],
+        expected_boolean={"a_contains_b": True},
     ),
     BenchmarkQuery(
         id="AE03", category="Contenção Espacial", difficulty="medium",
         query="O aeroporto de Bagé fica dentro do município de Bagé?",
-        expected_tools=["search_features", "search_municipality", "check_contains"],
-        expected_boolean={"contains": True},
+        expected_tools=["search_features", "search_municipality", "check_spatial_relation"],
+        expected_boolean={"a_contains_b": True},
     ),
     BenchmarkQuery(
         id="AE04", category="Contenção Espacial", difficulty="hard",
         query="A terra indígena Guarita está no Rio Grande do Sul?",
-        expected_tools=["search_features", "search_state", "check_contains"],
-        expected_boolean={"contains": True},
+        expected_tools=["search_features", "search_state", "check_spatial_relation"],
+        expected_boolean={"a_contains_b": True},
     ),
     BenchmarkQuery(
         id="AE05", category="Contenção Espacial", difficulty="medium",
         query="O município de Alegrete está contido na Serra Gaúcha?",
-        expected_tools=["search_municipality", "search_named_region", "check_contains"],
-        expected_boolean={"contains": False},
+        expected_tools=["search_municipality", "search_named_region", "check_spatial_relation"],
+        expected_boolean={"a_contains_b": False},
     ),
     BenchmarkQuery(
         id="AE06", category="Contenção Espacial", difficulty="hard",

@@ -216,15 +216,17 @@ class TestBuffer:
         assert len(geom["coordinates"][0]) > 10
 
 
-class TestCheckIntersection:
+class TestCheckSpatialRelation:
     def test_overlapping(self):
         h = make_handlers()
         a = h.gs.put({"type": "Polygon", "coordinates": [
             [[0, 0], [2, 0], [2, 2], [0, 2], [0, 0]]]}, "a")
         b = h.gs.put({"type": "Polygon", "coordinates": [
             [[1, 1], [3, 1], [3, 3], [1, 3], [1, 1]]]}, "b")
-        r = h.check_intersection(a, b)
+        r = h.check_spatial_relation(a, b)
         assert r["intersects"] is True
+        assert r["a_contains_b"] is False
+        assert r["b_contains_a"] is False
 
     def test_non_overlapping(self):
         h = make_handlers()
@@ -232,26 +234,26 @@ class TestCheckIntersection:
             [[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]]]}, "a")
         b = h.gs.put({"type": "Polygon", "coordinates": [
             [[10, 10], [11, 10], [11, 11], [10, 11], [10, 10]]]}, "b")
-        r = h.check_intersection(a, b)
+        r = h.check_spatial_relation(a, b)
         assert r["intersects"] is False
 
-
-class TestCheckContains:
     def test_point_in_polygon(self):
         h = make_handlers()
         poly = h.gs.put({"type": "Polygon", "coordinates": [
             [[0, 0], [10, 0], [10, 10], [0, 10], [0, 0]]]}, "poly")
         pt = h.gs.put({"type": "Point", "coordinates": [5, 5]}, "pt")
-        r = h.check_contains(poly, pt)
-        assert r["contains"] is True
+        r = h.check_spatial_relation(poly, pt)
+        assert r["intersects"] is True
+        assert r["a_contains_b"] is True
+        assert r["b_contains_a"] is False
 
     def test_point_outside(self):
         h = make_handlers()
         poly = h.gs.put({"type": "Polygon", "coordinates": [
             [[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]]]}, "poly")
         pt = h.gs.put({"type": "Point", "coordinates": [5, 5]}, "pt")
-        r = h.check_contains(poly, pt)
-        assert r["contains"] is False
+        r = h.check_spatial_relation(poly, pt)
+        assert r["a_contains_b"] is False
 
 
 class TestIntersect:
@@ -419,12 +421,13 @@ class TestComputeRoute:
 
 
 class TestFeaturesAlongRoute:
-    def test_structure(self):
+    def test_buffer_then_search(self):
         h = make_handlers()
         a = h.geocode("Santa Maria, RS")
         b = h.geocode("Porto Alegre, RS")
         route = h.compute_route(a["geometry_ref"], b["geometry_ref"])
-        r = h.features_along_route("hospital", route["geometry_ref"], buffer_metros=10000)
+        buf = h.buffer(route["geometry_ref"], 10000)
+        r = h.search_features("hospital", buf["geometry_ref"])
         assert "total" in r
         assert "features" in r
 

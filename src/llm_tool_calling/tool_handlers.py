@@ -865,30 +865,17 @@ class ToolHandlers:
                 return {"total": len(results), "nearest": results}
         return {"total": 0, "nearest": []}
 
-    def features_along_route(self, tipo: str, geometry_ref: str,
-                              buffer_metros: float = 500) -> dict:
-        try:
-            self.gs.get(geometry_ref)
-        except KeyError:
-            return {"error": f"Unknown geometry_ref: {geometry_ref}"}
-        buf_result = self.buffer(geometry_ref, buffer_metros)
-        return self.search_features(tipo=tipo, geometry_ref=buf_result["geometry_ref"])
-
-    def check_intersection(self, geometry_ref_a: str, geometry_ref_b: str) -> dict:
+    def check_spatial_relation(self, geometry_ref_a: str, geometry_ref_b: str) -> dict:
         try:
             geom_a = self.gs.get(geometry_ref_a)
             geom_b = self.gs.get(geometry_ref_b)
         except KeyError as e:
             return {"error": f"Unknown geometry_ref: {e}"}
-        return {"intersects": geo.intersects(geom_a, geom_b)}
-
-    def check_contains(self, geometry_ref_a: str, geometry_ref_b: str) -> dict:
-        try:
-            geom_a = self.gs.get(geometry_ref_a)
-            geom_b = self.gs.get(geometry_ref_b)
-        except KeyError as e:
-            return {"error": f"Unknown geometry_ref: {e}"}
-        return {"contains": geo.contains(geom_a, geom_b)}
+        return {
+            "intersects": geo.intersects(geom_a, geom_b),
+            "a_contains_b": geo.contains(geom_a, geom_b),
+            "b_contains_a": geo.contains(geom_b, geom_a),
+        }
 
     def list_municipalities_in(self, geometry_ref: str) -> dict:
         try:

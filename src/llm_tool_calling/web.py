@@ -45,13 +45,11 @@ _TOOL_MESSAGES = {
         "compute_area": lambda a: "Calculando área...",
         "compute_length": lambda a: "Calculando comprimento...",
         "find_nearest": lambda a: f'Buscando {a.get("tipo", "?")} mais próximo...',
-        "features_along_route": lambda a: f'Buscando {a.get("tipo", "?")} ao longo da rota...',
-        "check_intersection": lambda a: "Verificando interseção...",
+        "check_spatial_relation": lambda a: "Verificando relação espacial...",
         "search_road": lambda a: f'Buscando rodovia "{a.get("identificador", "")}"...',
         "list_municipalities_in": lambda a: "Listando municípios na área...",
         "create_point": lambda a: f'Criando ponto em ({a.get("lat", "?")}, {a.get("lon", "?")})...',
         "reverse_geocode": lambda a: f'Geocodificação reversa ({a.get("lat", "?")}, {a.get("lon", "?")})...',
-        "check_contains": lambda a: "Verificando contenção...",
         "get_neighbors": lambda a: "Buscando municípios vizinhos...",
         "search_by_articulation": lambda a: f'Buscando articulação "{a.get("codigo", "")}"...',
         "get_elevation": lambda a: "Obtendo elevação...",
@@ -74,13 +72,11 @@ _TOOL_MESSAGES = {
         "compute_area": lambda a, r: f'{r.get("area_km2", "?")} km²',
         "compute_length": lambda a, r: f'{r.get("length_km", "?")} km',
         "find_nearest": lambda a, r: f'{r.get("total", 0)} resultado(s)' + (f' — mais próximo: {r["nearest"][0]["nome"]} ({r["nearest"][0]["distance_km"]} km)' if r.get("nearest") else ""),
-        "features_along_route": lambda a, r: f'{r.get("total", 0)} {a.get("tipo", "feição")}(s) na rota',
-        "check_intersection": lambda a, r: "Sim, interceptam" if r.get("intersects") else "Não interceptam",
+        "check_spatial_relation": lambda a, r: ("Interceptam" if r.get("intersects") else "Não interceptam") + (", A contém B" if r.get("a_contains_b") else "") + (", B contém A" if r.get("b_contains_a") else ""),
         "search_road": lambda a, r: f'{r.get("nome", "?")} — {r.get("extensao_km", "?")} km' if "nome" in r else r.get("error", "?"),
         "list_municipalities_in": lambda a, r: f'{r.get("total", 0)} município(s)',
         "create_point": lambda a, r: f'Ponto criado ({r.get("lat", "?")}, {r.get("lon", "?")})',
         "reverse_geocode": lambda a, r: f'{r.get("municipio", "?")}/{r.get("uf", "?")}' if r.get("municipio") else "Fora de municípios conhecidos",
-        "check_contains": lambda a, r: "Sim, contém" if r.get("contains") else "Não contém",
         "get_neighbors": lambda a, r: f'{r.get("total", 0)} vizinho(s)',
         "search_by_articulation": lambda a, r: f'{r.get("total", 0)} produto(s)' if "total" in r else r.get("error", "?"),
         "get_elevation": lambda a, r: f'{r.get("elevation_m", r.get("avg_elevation_m", "?"))}m',
@@ -168,7 +164,7 @@ def search_stream():
                 tool = step["tool"]
                 res = step.get("result", {})
                 feat_list = res.get("features") or res.get("nearest") or []
-                if tool in ("search_features", "features_along_route", "find_nearest") and feat_list:
+                if tool in ("search_features", "find_nearest") and feat_list:
                     tipo = step.get("args", {}).get("tipo", "")
                     for f in feat_list:
                         key = f.get("nome", "")
