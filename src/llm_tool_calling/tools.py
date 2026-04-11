@@ -111,7 +111,12 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "search_state",
-            "description": "Retorna o polígono e área de um estado brasileiro. Use para consultas em nível estadual.",
+            "description": (
+                "Retorna o polígono, area_km2 e geometry_ref de um estado brasileiro. "
+                "Use para consultas em nível estadual (produtos no RS, feições no PR). "
+                "NÃO use para municípios — use search_municipality. "
+                "NÃO use para regiões informais (Serra Gaúcha, Pantanal) — use search_named_region."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -127,7 +132,8 @@ TOOLS = [
         "function": {
             "name": "search_named_region",
             "description": (
-                "Retorna a geometria de regiões informais/geográficas que NÃO são divisões administrativas. "
+                "Retorna a geometria, area_km2 e geometry_ref de regiões informais/geográficas "
+                "que NÃO são divisões administrativas. "
                 "Exemplos: Serra Gaúcha, Pantanal, Litoral Norte, Vale do Taquari, Amazônia Legal. "
                 "NÃO use para municípios ou estados — use search_municipality ou search_state."
             ),
@@ -235,10 +241,13 @@ TOOLS = [
             "name": "search_features",
             "description": (
                 "Busca feições geográficas de um tipo específico DENTRO de uma área (polígono ou buffer). "
-                "Retorna lista de feições com atributos e geometry_ref. "
+                "Retorna lista com nome, geometry_ref e atributos (altura_m, comprimento_m, leitos, pista_m, capacidade_ton). "
+                "Máximo 50 feições por busca — para áreas grandes, use buffers menores ou filtro de atributo. "
                 "Use para: 'quantas pontes em Alegrete', 'torres de comunicação no RS'. "
                 "Para feições ao longo de rota/rodovia: primeiro use buffer na rota, depois search_features no buffer. "
-                "NÃO use para 'mais próximo de X' — use find_nearest."
+                "Aceita geometry_ref como string (único) ou array (lote para múltiplas áreas). "
+                "NÃO use para 'mais próximo de X' — use find_nearest. "
+                "Exemplo: search_features(tipo='ponte', geometry_ref='buffer_alegrete_10km', atributo='comprimento_m', operador='>', valor=100)"
             ),
             "parameters": {
                 "type": "object",
@@ -274,7 +283,9 @@ TOOLS = [
             "name": "find_nearest",
             "description": (
                 "Encontra as N feições mais próximas de um tipo a partir de um ponto de referência. "
-                "Retorna feições ordenadas por distance_km. "
+                "Retorna lista ordenada por distance_km com nome, geometry_ref e atributos de cada feição. "
+                "Padrão: 3 resultados (controlável via limit). "
+                "Aceita geometry_ref como string (único) ou array (lote para múltiplos pontos). "
                 "Use para: 'hospital mais próximo', 'aeroporto mais perto de X'. "
                 "NÃO use para contar feições em uma área — use search_features."
             ),
@@ -307,7 +318,9 @@ TOOLS = [
             "description": (
                 "Cria uma zona de buffer circular (polígono) ao redor de qualquer geometria. Retorna geometry_ref e area_km2. "
                 "Use para criar áreas de busca ao redor de pontos, rotas ou fronteiras. "
-                "Raios típicos: 10m (rota local), 5000m (local), 20000m (regional), 150000m (faixa de fronteira)."
+                "Raios típicos: 10m (rota local), 5000m (local), 20000m (regional), 150000m (faixa de fronteira). "
+                "Aceita geometry_ref como string (único) ou array (lote para múltiplas geometrias). "
+                "Exemplo lote: buffer(geometry_ref=['geom_a', 'geom_b'], raio_metros=10000)"
             ),
             "parameters": {
                 "type": "object",
@@ -371,7 +384,8 @@ TOOLS = [
                 "intersects (qualquer sobreposição), a_contains_b (A contém totalmente B), b_contains_a (B contém totalmente A). "
                 "Use para: 'a rota passa por X?', 'o rio cruza o município?', "
                 "'ponto X está dentro de Y?', 'o estado contém essa região?'. "
-                "NÃO use intersect (que calcula a geometria de sobreposição) — esta tool só retorna booleanos."
+                "NÃO use intersect (que calcula a geometria de sobreposição) — esta tool só retorna booleanos. "
+                "Exemplo: check_spatial_relation(geometry_ref_a='geom_rota', geometry_ref_b='geom_muni') → {intersects: true, a_contains_b: false}"
             ),
             "parameters": {
                 "type": "object",
@@ -393,7 +407,8 @@ TOOLS = [
         "function": {
             "name": "compute_distance",
             "description": (
-                "Calcula a distância em linha reta (geodésica) entre duas geometrias em km. "
+                "Calcula a distância em linha reta (geodésica) entre duas geometrias em km. Retorna distance_km. "
+                "Aceita geometry_ref_b como string (único) ou array (distância a múltiplos pontos). "
                 "Use para 'qual a distância de X a Y' em linha reta. "
                 "NÃO use para distância por estrada — use compute_route."
             ),
@@ -416,7 +431,8 @@ TOOLS = [
         "function": {
             "name": "compute_area",
             "description": (
-                "Calcula a área de um polígono em km². "
+                "Calcula a área de um polígono em km². Retorna area_km2. "
+                "Aceita geometry_ref como string (único) ou array (lote para múltiplos polígonos). "
                 "Use para: 'área do município X', 'tamanho da zona de buffer'."
             ),
             "parameters": {
@@ -437,7 +453,8 @@ TOOLS = [
         "function": {
             "name": "compute_length",
             "description": (
-                "Calcula o comprimento de uma geometria de linha (rota, rio, fronteira) em km. "
+                "Calcula o comprimento de uma geometria de linha (rota, rio, fronteira) em km. Retorna length_km. "
+                "Aceita geometry_ref como string (único) ou array (lote para múltiplas linhas). "
                 "Use para: 'comprimento da rota', 'extensão do rio', 'tamanho da fronteira'."
             ),
             "parameters": {
@@ -465,7 +482,8 @@ TOOLS = [
                 "Busca produtos geoespaciais no catálogo. Ferramenta principal de busca de produtos. "
                 "Requer geometry_ref de uma tool anterior (search_municipality, buffer, etc.). "
                 "Retorna produtos com escala, data_produto, articulacao, nome. "
-                "Analise os resultados para encontrar 'melhor escala' ou 'mais recente'."
+                "Analise os resultados para encontrar 'melhor escala' ou 'mais recente'. "
+                "Exemplo: search_products(geometry_ref='muni_alegrete', tipo='carta_topografica', escala=50000)"
             ),
             "parameters": {
                 "type": "object",
@@ -491,6 +509,7 @@ TOOLS = [
             "name": "search_by_articulation",
             "description": (
                 "Busca produtos geoespaciais pelo código de articulação da folha (MI ou INOM). "
+                "Retorna produtos com escala, data_produto, articulacao, nome. "
                 "Use quando o usuário fornece um código de articulação como 'SH-22-V-C-IV-1'. "
                 "NÃO use para buscas geográficas — use search_products."
             ),
@@ -514,7 +533,10 @@ TOOLS = [
             "name": "list_municipalities_in",
             "description": (
                 "Lista todos os municípios que intersectam uma geometria. "
-                "Use para: 'municípios ao longo da rota', 'cidades num raio de 50km'."
+                "Retorna lista com nome, uf, populacao de cada município. "
+                "Máximo 100 municípios retornados, ordenados por população. "
+                "Use para: 'municípios ao longo da rota', 'cidades num raio de 50km'. "
+                "NÃO use para um município específico — use search_municipality."
             ),
             "parameters": {
                 "type": "object",
@@ -532,8 +554,10 @@ TOOLS = [
             "name": "get_neighbors",
             "description": (
                 "Retorna os municípios que fazem divisa com um município. "
+                "Retorna lista com nome, uf, populacao de cada vizinho. "
                 "Use para: 'municípios vizinhos de Alegrete', 'quem faz divisa com Santa Maria'. "
-                "Requer geometry_ref de um município (de search_municipality)."
+                "Requer geometry_ref de um município (de search_municipality). "
+                "NÃO use para municípios dentro de uma área — use list_municipalities_in."
             ),
             "parameters": {
                 "type": "object",
@@ -574,9 +598,10 @@ TOOLS = [
             "name": "get_terrain_profile",
             "description": (
                 "Retorna o perfil de elevação ao longo de uma LineString (rota, rodovia, rio). "
-                "Amostra ~10 pontos. Retorna min_m, max_m, avg_m, max_slope_pct, "
+                "Amostra até 20 pontos de elevação. Retorna min_m, max_m, avg_m, max_slope_pct, "
                 "total_ascent_m, total_descent_m, classification (plano/ondulado/montanhoso). "
-                "Use para: 'perfil de elevação da rota', 'o terreno é montanhoso?'."
+                "Use para: 'perfil de elevação da rota', 'o terreno é montanhoso?'. "
+                "NÃO use para elevação de um único ponto — use get_elevation."
             ),
             "parameters": {
                 "type": "object",
@@ -679,7 +704,8 @@ TOOLS = [
             "description": (
                 "Calcula uma rota rodoviária passando por múltiplos pontos na ordem fornecida. "
                 "Retorna distance_km, duration_min, length_km, geometry_ref (LineString). "
-                "Use para: 'rota de A a C passando por B', 'roteiro visitando 5 cidades'."
+                "Use para: 'rota de A a C passando por B', 'roteiro visitando 5 cidades'. "
+                "Exemplo: compute_route_waypoints(geometry_refs=['geom_a', 'geom_b', 'geom_c'])"
             ),
             "parameters": {
                 "type": "object",
@@ -705,9 +731,11 @@ TOOLS = [
         "function": {
             "name": "get_weather",
             "description": (
-                "Retorna as condições meteorológicas atuais de um local. "
-                "Dados: temperatura, sensação térmica, umidade, precipitação, vento, condições. "
-                "Use para: 'como está o tempo em Porto Alegre?', 'condições climáticas para operação'."
+                "Retorna as condições meteorológicas ATUAIS de um local. "
+                "Retorna temperatura_c, sensacao_termica_c, umidade_pct, precipitacao_mm, vento_kmh, condicoes. "
+                "Use para: 'como está o tempo em Porto Alegre?', 'condições climáticas para operação'. "
+                "Requer geometry_ref de uma tool anterior (geocode, search_municipality, etc.). "
+                "NÃO use para previsão futura — retorna apenas condições atuais."
             ),
             "parameters": {
                 "type": "object",

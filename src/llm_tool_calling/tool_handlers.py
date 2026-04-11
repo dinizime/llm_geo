@@ -82,14 +82,25 @@ def _read_response(resp) -> bytes:
 
 
 def _fetch_json(url: str, timeout: int = 10, method: str = "GET",
-                data: bytes = None) -> dict | list | None:
-    """Fetch JSON from URL with gzip handling. Returns parsed JSON or None."""
-    try:
-        req = urllib.request.Request(url, data=data, headers=_UA)
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            return json.loads(_read_response(resp))
-    except Exception:
-        return None
+                data: bytes = None, retries: int = 2) -> dict | list | None:
+    """Fetch JSON from URL with gzip handling and retry. Returns parsed JSON or None."""
+    import time as _time
+    for attempt in range(retries):
+        try:
+            req = urllib.request.Request(url, data=data, headers=_UA)
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                return json.loads(_read_response(resp))
+        except urllib.error.HTTPError as e:
+            if e.code == 429 and attempt < retries - 1:
+                _time.sleep(3 * (2 ** attempt))
+                continue
+            return None
+        except Exception:
+            if attempt < retries - 1:
+                _time.sleep(2 * (2 ** attempt))
+                continue
+            return None
+    return None
 
 
 # ─── Open-Meteo Elevation API ─────────────────────────────────
@@ -142,7 +153,7 @@ _OSM_TAGS = {
 
 
 def _overpass_post(full_query: str, timeout: int = 25) -> dict | None:
-    """Execute raw Overpass query with retry on 429. Returns parsed JSON or None."""
+    """Execute raw Overpass query with exponential backoff on 429. Returns parsed JSON or None."""
     import time as _time
     url = "https://overpass-api.de/api/interpreter"
     data = urllib.parse.urlencode({"data": full_query}).encode()
@@ -153,10 +164,13 @@ def _overpass_post(full_query: str, timeout: int = 25) -> dict | None:
                 return json.loads(resp.read())
         except urllib.error.HTTPError as e:
             if e.code == 429 and attempt < 2:
-                _time.sleep(5 * (attempt + 1))
+                _time.sleep(5 * (2 ** attempt))  # 5s, 10s (exponential)
                 continue
             return None
         except Exception:
+            if attempt < 2:
+                _time.sleep(3 * (2 ** attempt))  # 3s, 6s for transient errors
+                continue
             return None
     return None
 
@@ -575,7 +589,7 @@ def _overpass_border(pais: str) -> dict | None:
 
 def _osrm_route(
     o_lon: float, o_lat: float, d_lon: float, d_lat: float
-) -> tuple[dict, float, int]:
+) -> tuple[dict, float, int, bool]:
     """Call OSRM for a 2-point route. Delegates to _osrm_route_waypoints."""
     return _osrm_route_waypoints([(o_lon, o_lat), (d_lon, d_lat)])
 
@@ -619,9 +633,9 @@ def _open_meteo_weather(lat: float, lon: float) -> dict | None:
 
 def _osrm_route_waypoints(
     points: list[tuple[float, float]],
-) -> tuple[dict, float, int]:
+) -> tuple[dict, float, int, bool]:
     """OSRM route through multiple waypoints. points = [(lon, lat), ...].
-    Returns (geojson_geom, distance_km, duration_min)."""
+    Returns (geojson_geom, distance_km, duration_min, is_estimate)."""
     coords_str = ";".join(f"{lon},{lat}" for lon, lat in points)
     url = (
         f"http://router.project-osrm.org/route/v1/driving/{coords_str}"
@@ -635,7 +649,7 @@ def _osrm_route_waypoints(
         geom = route["geometry"]
         distance_km = round(route["distance"] / 1000, 1)
         duration_min = round(route["duration"] / 60)
-        return geom, distance_km, duration_min
+        return geom, distance_km, duration_min, False
     except Exception:
         geom = {"type": "LineString", "coordinates": [list(p) for p in points]}
         total_km = sum(
@@ -643,7 +657,7 @@ def _osrm_route_waypoints(
             for i in range(len(points) - 1)
         )
         road_km = round(total_km * 1.3, 1)
-        return geom, road_km, round(road_km / 80 * 60)
+        return geom, road_km, round(road_km / 80 * 60), True
 
 
 def _overpass_municipalities_in_bbox(bbox_tuple: tuple[float, float, float, float],
@@ -696,7 +710,8 @@ class ToolHandlers:
     def geocode(self, place_name: str) -> dict:
         hit = _nominatim_geocode(place_name)
         if not hit:
-            return {"error": f"Place '{place_name}' not found"}
+            return {"error": f"Lugar '{place_name}' não encontrado",
+                    "dica": "Tente incluir o estado (ex: 'Alecrim, RS') ou use search_municipality para municípios"}
         ref = self.gs.put(
             {"type": "Point", "coordinates": [hit["lon"], hit["lat"]]},
             label=hit["display_name"],
@@ -741,7 +756,8 @@ class ToolHandlers:
         hit = _ibge_municipality(nome, uf)
         if hit:
             return self._municipality_result(hit)
-        return {"error": f"Municipality '{nome}' not found"}
+        return {"error": f"Município '{nome}' não encontrado",
+                "dica": "Verifique a grafia ou inclua uf para desambiguar (ex: uf='RS')"}
 
     def search_state(self, uf: str) -> dict:
         hit = _ibge_state(uf)
@@ -750,7 +766,8 @@ class ToolHandlers:
             return {"uf": hit["uf"], "nome": hit["nome"],
                     "area_km2": geo.area_km2(hit["geometry"]),
                     "geometry_ref": ref}
-        return {"error": f"State '{uf}' not found"}
+        return {"error": f"Estado '{uf}' não encontrado",
+                "dica": "Use a sigla de 2 letras (ex: 'RS', 'SP', 'MG')"}
 
     def search_named_region(self, nome: str) -> dict:
         key = nome.lower().strip()
@@ -761,7 +778,8 @@ class ToolHandlers:
                 return {"nome": v["nome"],
                         "area_km2": geo.area_km2(v["geometry"]),
                         "geometry_ref": ref}
-        return {"error": f"Region '{nome}' not found"}
+        return {"error": f"Região '{nome}' não encontrada",
+                "dica": "Verifique o nome. Regiões disponíveis: Serra Gaúcha, Pantanal, Litoral Norte, etc."}
 
     def search_products(self, geometry_ref: str, tipo: str = None, escala: int = None,
                         data_inicio: str = None, data_fim: str = None, **kwargs) -> dict:
@@ -830,11 +848,14 @@ class ToolHandlers:
             return {"error": f"Unknown geometry_ref: {dest_ref}"}
         o_lon, o_lat = geo.centroid(origin)
         d_lon, d_lat = geo.centroid(dest)
-        route_geom, road_km, duration_min = _osrm_route(o_lon, o_lat, d_lon, d_lat)
+        route_geom, road_km, duration_min, is_estimate = _osrm_route(o_lon, o_lat, d_lon, d_lat)
         ref = self.gs.put(route_geom, label="route")
-        return {"distance_km": road_km, "duration_min": duration_min,
-                "length_km": geo.length_km(route_geom),
-                "geometry_ref": ref}
+        result = {"distance_km": road_km, "duration_min": duration_min,
+                  "length_km": geo.length_km(route_geom),
+                  "geometry_ref": ref}
+        if is_estimate:
+            result["nota"] = "OSRM indisponível — distância estimada via haversine × 1.3"
+        return result
 
     def search_hydrography(self, nome: str, tipo: str = None, uf: str = None) -> dict:
         hit = _overpass_hydrography(nome)
@@ -843,7 +864,8 @@ class ToolHandlers:
             return {"nome": hit["nome"], "tipo": hit["tipo"],
                     "length_km": geo.length_km(hit["geometry"]),
                     "geometry_ref": ref}
-        return {"error": f"Hydrography '{nome}' not found"}
+        return {"error": f"Hidrografia '{nome}' não encontrada",
+                "dica": "Tente variações do nome (ex: 'Rio Uruguai' ou apenas 'Uruguai')"}
 
     def search_border(self, pais: str, proximidade_ref: str = None,
                       raio_m: float = None) -> dict:
@@ -862,7 +884,8 @@ class ToolHandlers:
             return {"pais": hit["pais"],
                     "length_km": geo.length_km(hit["geometry"]),
                     "geometry_ref": ref}
-        return {"error": f"Border with '{pais}' not found"}
+        return {"error": f"Fronteira com '{pais}' não encontrada",
+                "dica": "Países válidos: Argentina, Uruguai, Paraguai, Bolívia, Peru, Colômbia, Venezuela, Guiana, Suriname, Guiana Francesa"}
 
     def _search_features_single(self, key: str, area_geom: dict,
                                 atributo=None, operador=None, valor=None) -> list[dict]:
@@ -887,7 +910,8 @@ class ToolHandlers:
         key = tipo.lower().strip()
         if key not in _OSM_TAGS:
             return {"total": 0, "features": [],
-                    "note": f"Feature type '{tipo}' not supported"}
+                    "error": f"Tipo '{tipo}' não suportado",
+                    "tipos_validos": list(_OSM_TAGS.keys())}
         refs = _normalize_refs(geometry_ref)
         all_results = []
         seen_names = set()
@@ -900,7 +924,12 @@ class ToolHandlers:
                 if f["nome"] not in seen_names:
                     seen_names.add(f["nome"])
                     all_results.append(f)
-        return {"total": len(all_results), "features": all_results}
+        total = len(all_results)
+        MAX_DISPLAY_FEATURES = 15
+        if total > MAX_DISPLAY_FEATURES:
+            return {"total": total, "features": all_results[:MAX_DISPLAY_FEATURES],
+                    "nota": f"Mostrando {MAX_DISPLAY_FEATURES} de {total} feições. Use filtro de atributo para refinar."}
+        return {"total": total, "features": all_results}
 
     def search_military_installation(self, nome_ou_sigla: str,
                                       cidade: str = None) -> dict:
@@ -932,7 +961,8 @@ class ToolHandlers:
                 "uf": "",
                 "geometry_ref": ref,
             }
-        return {"error": f"Military installation '{nome_ou_sigla}' not found"}
+        return {"error": f"Instalação militar '{nome_ou_sigla}' não encontrada",
+                "dica": "Tente nome completo, sigla ou variações (ex: '8ª Bda Inf Mec', '3º B Sup')"}
 
     def search_road(self, identificador: str, uf: str = None) -> dict:
         hit = _overpass_road(identificador)
@@ -944,7 +974,8 @@ class ToolHandlers:
                 "extensao_km": hit["extensao_km"],
                 "geometry_ref": ref,
             }
-        return {"error": f"Road '{identificador}' not found"}
+        return {"error": f"Rodovia '{identificador}' não encontrada",
+                "dica": "Use o código oficial com hífen (ex: 'BR-116', 'RS-040'). Tente incluir uf para filtrar trecho."}
 
     # ─── Spatial computation & analysis (Shapely/pyproj) ───────
 
@@ -1044,7 +1075,8 @@ class ToolHandlers:
         key = tipo.lower().strip()
         if key not in _OSM_TAGS:
             return {"total": 0, "nearest": [],
-                    "note": f"Feature type '{tipo}' not supported"}
+                    "error": f"Tipo '{tipo}' não suportado",
+                    "tipos_validos": list(_OSM_TAGS.keys())}
         refs = _normalize_refs(geometry_ref)
         if len(refs) == 1:
             try:
@@ -1096,7 +1128,12 @@ class ToolHandlers:
                         results.append({"nome": m["nome"], "uf": m["uf"],
                                         "populacao": m["populacao"]})
             results.sort(key=lambda x: x["populacao"], reverse=True)
-            return {"total": len(results), "municipalities": results}
+            total = len(results)
+            MAX_DISPLAY_MUNIS = 30
+            if total > MAX_DISPLAY_MUNIS:
+                return {"total": total, "municipalities": results[:MAX_DISPLAY_MUNIS],
+                        "nota": f"Mostrando {MAX_DISPLAY_MUNIS} de {total} municípios (por população)."}
+            return {"total": total, "municipalities": results}
         return {"total": 0, "municipalities": []}
 
     def get_neighbors(self, geometry_ref: str) -> dict:
@@ -1222,15 +1259,18 @@ class ToolHandlers:
                 return {"error": f"Unknown geometry_ref: {ref}"}
             lon, lat = geo.centroid(geom)
             points.append((lon, lat))
-        route_geom, distance_km, duration_min = _osrm_route_waypoints(points)
+        route_geom, distance_km, duration_min, is_estimate = _osrm_route_waypoints(points)
         ref = self.gs.put(route_geom, label="route_waypoints")
-        return {
+        result = {
             "distance_km": distance_km,
             "duration_min": duration_min,
             "length_km": geo.length_km(route_geom),
             "waypoints": len(geometry_refs),
             "geometry_ref": ref,
         }
+        if is_estimate:
+            result["nota"] = "OSRM indisponível — distância estimada via haversine × 1.3"
+        return result
 
     def get_weather(self, geometry_ref: str) -> dict:
         try:
@@ -1240,7 +1280,8 @@ class ToolHandlers:
         lon, lat = geo.centroid(geom)
         weather = _open_meteo_weather(lat, lon)
         if not weather:
-            return {"error": "Could not retrieve weather data"}
+            return {"error": "Não foi possível obter dados meteorológicos",
+                    "dica": "API Open-Meteo pode estar indisponível. Tente novamente."}
         weather["lat"] = round(lat, 4)
         weather["lon"] = round(lon, 4)
         return weather
@@ -1257,7 +1298,8 @@ class ToolHandlers:
             lon, lat = geom["coordinates"][0], geom["coordinates"][1]
             elev = _open_meteo_elevation(lat, lon)
             if elev is None:
-                return {"error": "Could not retrieve elevation"}
+                return {"error": "Não foi possível obter elevação",
+                        "dica": "API Open-Meteo pode estar indisponível. Tente novamente."}
             return {"elevation_m": elev}
         elif gtype == "Polygon":
             ring = geom.get("coordinates", [[]])[0]
