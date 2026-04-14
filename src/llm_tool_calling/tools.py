@@ -73,7 +73,9 @@ TOOLS = [
             "description": (
                 "Determina em qual município uma coordenada se encontra. "
                 "Retorna municipio, uf, estado. "
-                "Use quando você tem coordenadas e precisa saber o nome do município."
+                "Use quando você tem coordenadas e precisa saber o nome do município. "
+                "NÃO use para obter o polígono/área do município — o resultado é só texto; "
+                "para isso, chame search_municipality(nome=resultado.municipio) em seguida."
             ),
             "parameters": {
                 "type": "object",
@@ -196,8 +198,10 @@ TOOLS = [
         "function": {
             "name": "search_road",
             "description": (
-                "Busca uma rodovia pelo código oficial. Retorna geometry_ref (LineString) e extensao_km. "
-                "Use para perguntas sobre rodovias. Aceita códigos BR ou estaduais: BR-101, BR-116, BR-290, RS-040."
+                "Busca uma rodovia pelo código oficial. Retorna geometry_ref (LineString) e length_km. "
+                "Use para perguntas sobre rodovias. Aceita códigos BR ou estaduais: BR-101, BR-116, BR-290, RS-040. "
+                "NÃO use para 'municípios atravessados pela rodovia' diretamente — primeiro busque a rodovia, depois passe geometry_ref para list_municipalities_in. "
+                "NÃO use para feições ao longo da rodovia — primeiro busque, depois aplique buffer e search_features."
             ),
             "parameters": {
                 "type": "object",
@@ -341,8 +345,11 @@ TOOLS = [
         "function": {
             "name": "intersect",
             "description": (
-                "Calcula a interseção geométrica de duas geometrias. Retorna geometry_ref e area_km2. "
-                "Use quando precisar da área de sobreposição entre duas regiões."
+                "Calcula a interseção geométrica de duas geometrias. Retorna geometry_ref, type, "
+                "e area_km2 (se polígono) ou length_km (se linha). "
+                "Use quando precisar da GEOMETRIA ou ÁREA de sobreposição entre duas regiões. "
+                "NÃO use para apenas verificar SE há sobreposição (booleano) — use check_spatial_relation, "
+                "que é mais barato. NÃO use para recortar uma linha por um polígono — use clip."
             ),
             "parameters": {
                 "type": "object",
@@ -685,7 +692,9 @@ TOOLS = [
             "name": "compute_centroid",
             "description": (
                 "Calcula o centroide (ponto central) de uma geometria. Retorna lat, lon, geometry_ref (Point). "
-                "Use para: 'centro do município', 'ponto central da rota' — cria um Point reutilizável."
+                "Use para: 'centro do município', 'ponto central da rota' — cria um Point reutilizável. "
+                "NÃO use para 'qual município contém este ponto' — use reverse_geocode. "
+                "NÃO precisa chamar antes de buffer/get_weather/get_elevation — essas tools já usam o centroide internamente."
             ),
             "parameters": {
                 "type": "object",

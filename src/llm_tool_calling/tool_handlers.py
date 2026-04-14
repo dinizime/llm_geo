@@ -730,7 +730,7 @@ class ToolHandlers:
             try:
                 geom = self.gs.get(geometry_ref)
             except KeyError:
-                return {"error": f"Unknown geometry_ref: {geometry_ref}"}
+                return self.gs.unknown_ref_error(geometry_ref)
             lon, lat = geo.centroid(geom)
         if lat is None or lon is None:
             return {"error": "Provide lat/lon or geometry_ref"}
@@ -803,7 +803,7 @@ class ToolHandlers:
             try:
                 geom = self.gs.get(refs[0])
             except KeyError:
-                return {"error": f"Unknown geometry_ref: {refs[0]}"}
+                return self.gs.unknown_ref_error(refs[0])
             buffered = geo.buffer_meters(geom, raio_metros)
             ref = self.gs.put(buffered, label=f"buffer_{raio_metros}m")
             return {"geometry_ref": ref, "type": "Polygon",
@@ -826,26 +826,37 @@ class ToolHandlers:
     def intersect(self, geometry_ref_a: str, geometry_ref_b: str) -> dict:
         try:
             geom_a = self.gs.get(geometry_ref_a)
+        except KeyError:
+            return self.gs.unknown_ref_error(geometry_ref_a)
+        try:
             geom_b = self.gs.get(geometry_ref_b)
         except KeyError:
-            ref = self.gs.put({"type": "GeometryCollection", "geometries": []},
-                              label="intersect_empty")
-            return {"geometry_ref": ref, "area_km2": 0, "is_empty": True}
+            return self.gs.unknown_ref_error(geometry_ref_b)
         result_geojson = geo.intersection(geom_a, geom_b)
         is_empty = geo.to_shape(result_geojson).is_empty
         ref = self.gs.put(result_geojson, label="intersect_result")
-        area = geo.area_km2(result_geojson) if not is_empty else 0
-        return {"geometry_ref": ref, "area_km2": area, "is_empty": is_empty}
+        gtype = result_geojson.get("type", "")
+        result = {"geometry_ref": ref, "type": gtype, "is_empty": is_empty}
+        if not is_empty:
+            if gtype in ("Polygon", "MultiPolygon"):
+                result["area_km2"] = geo.area_km2(result_geojson)
+            elif gtype in ("LineString", "MultiLineString"):
+                result["length_km"] = geo.length_km(result_geojson)
+            else:
+                result["area_km2"] = 0
+        else:
+            result["area_km2"] = 0
+        return result
 
     def compute_route(self, origin_ref: str, dest_ref: str) -> dict:
         try:
             origin = self.gs.get(origin_ref)
         except KeyError:
-            return {"error": f"Unknown geometry_ref: {origin_ref}"}
+            return self.gs.unknown_ref_error(origin_ref)
         try:
             dest = self.gs.get(dest_ref)
         except KeyError:
-            return {"error": f"Unknown geometry_ref: {dest_ref}"}
+            return self.gs.unknown_ref_error(dest_ref)
         o_lon, o_lat = geo.centroid(origin)
         d_lon, d_lat = geo.centroid(dest)
         route_geom, road_km, duration_min, is_estimate = _osrm_route(o_lon, o_lat, d_lon, d_lat)
@@ -971,7 +982,7 @@ class ToolHandlers:
             return {
                 "nome": hit["nome"],
                 "descricao": hit["descricao"],
-                "extensao_km": hit["extensao_km"],
+                "length_km": hit["extensao_km"],
                 "geometry_ref": ref,
             }
         return {"error": f"Rodovia '{identificador}' não encontrada",
@@ -983,14 +994,14 @@ class ToolHandlers:
         try:
             geom_a = self.gs.get(geometry_ref_a)
         except KeyError:
-            return {"error": f"Unknown geometry_ref: {geometry_ref_a}"}
+            return self.gs.unknown_ref_error(geometry_ref_a)
         lon_a, lat_a = geo.centroid(geom_a)
         refs_b = _normalize_refs(geometry_ref_b)
         if len(refs_b) == 1:
             try:
                 geom_b = self.gs.get(refs_b[0])
             except KeyError:
-                return {"error": f"Unknown geometry_ref: {refs_b[0]}"}
+                return self.gs.unknown_ref_error(refs_b[0])
             lon_b, lat_b = geo.centroid(geom_b)
             return {"distance_km": round(geo.haversine(lon_a, lat_a, lon_b, lat_b), 1)}
         results = []
@@ -1011,7 +1022,7 @@ class ToolHandlers:
             try:
                 geom = self.gs.get(refs[0])
             except KeyError:
-                return {"error": f"Unknown geometry_ref: {refs[0]}"}
+                return self.gs.unknown_ref_error(refs[0])
             if geom.get("type") not in ("Polygon", "MultiPolygon"):
                 return {"error": "Geometry is not a Polygon"}
             return {"area_km2": geo.area_km2(geom)}
@@ -1034,7 +1045,7 @@ class ToolHandlers:
             try:
                 geom = self.gs.get(refs[0])
             except KeyError:
-                return {"error": f"Unknown geometry_ref: {refs[0]}"}
+                return self.gs.unknown_ref_error(refs[0])
             if geom.get("type") not in ("LineString", "MultiLineString"):
                 return {"error": "Geometry is not a LineString"}
             return {"length_km": geo.length_km(geom)}
@@ -1082,7 +1093,7 @@ class ToolHandlers:
             try:
                 ref_geom = self.gs.get(refs[0])
             except KeyError:
-                return {"error": f"Unknown geometry_ref: {refs[0]}"}
+                return self.gs.unknown_ref_error(refs[0])
             ref_lon, ref_lat = geo.centroid(ref_geom)
             results = self._find_nearest_single(key, ref_lon, ref_lat, limit)
             return {"total": len(results), "nearest": results}
@@ -1102,9 +1113,12 @@ class ToolHandlers:
     def check_spatial_relation(self, geometry_ref_a: str, geometry_ref_b: str) -> dict:
         try:
             geom_a = self.gs.get(geometry_ref_a)
+        except KeyError:
+            return self.gs.unknown_ref_error(geometry_ref_a)
+        try:
             geom_b = self.gs.get(geometry_ref_b)
-        except KeyError as e:
-            return {"error": f"Unknown geometry_ref: {e}"}
+        except KeyError:
+            return self.gs.unknown_ref_error(geometry_ref_b)
         return {
             "intersects": geo.intersects(geom_a, geom_b),
             "a_contains_b": geo.contains(geom_a, geom_b),
@@ -1115,7 +1129,7 @@ class ToolHandlers:
         try:
             geom = self.gs.get(geometry_ref)
         except KeyError:
-            return {"error": f"Unknown geometry_ref: {geometry_ref}"}
+            return self.gs.unknown_ref_error(geometry_ref)
         # Try Overpass first (has center coordinates for spatial filtering)
         bbox_tuple = geo.bbox(geom)
         munis = _overpass_municipalities_in_bbox(bbox_tuple)
@@ -1140,7 +1154,7 @@ class ToolHandlers:
         try:
             geom = self.gs.get(geometry_ref)
         except KeyError:
-            return {"error": f"Unknown geometry_ref: {geometry_ref}"}
+            return self.gs.unknown_ref_error(geometry_ref)
         min_lon, min_lat, max_lon, max_lat = geo.bbox(geom)
         margin = 0.5
         expanded = (min_lon - margin, min_lat - margin,
@@ -1184,7 +1198,7 @@ class ToolHandlers:
             try:
                 geoms.append(self.gs.get(ref))
             except KeyError:
-                return {"error": f"Unknown geometry_ref: {ref}"}
+                return self.gs.unknown_ref_error(ref)
         result_geojson = geo.union_all(geoms)
         is_empty = geo.to_shape(result_geojson).is_empty
         new_ref = self.gs.put(result_geojson, label="union_result")
@@ -1199,9 +1213,12 @@ class ToolHandlers:
     def difference(self, geometry_ref_a: str, geometry_ref_b: str) -> dict:
         try:
             geom_a = self.gs.get(geometry_ref_a)
+        except KeyError:
+            return self.gs.unknown_ref_error(geometry_ref_a)
+        try:
             geom_b = self.gs.get(geometry_ref_b)
-        except KeyError as e:
-            return {"error": f"Unknown geometry_ref: {e}"}
+        except KeyError:
+            return self.gs.unknown_ref_error(geometry_ref_b)
         result_geojson = geo.difference(geom_a, geom_b)
         is_empty = geo.to_shape(result_geojson).is_empty
         ref = self.gs.put(result_geojson, label="difference_result")
@@ -1218,9 +1235,12 @@ class ToolHandlers:
     def clip(self, geometry_ref_a: str, geometry_ref_b: str) -> dict:
         try:
             geom_a = self.gs.get(geometry_ref_a)
+        except KeyError:
+            return self.gs.unknown_ref_error(geometry_ref_a)
+        try:
             geom_b = self.gs.get(geometry_ref_b)
-        except KeyError as e:
-            return {"error": f"Unknown geometry_ref: {e}"}
+        except KeyError:
+            return self.gs.unknown_ref_error(geometry_ref_b)
         result_geojson = geo.intersection(geom_a, geom_b)
         result_shape = geo.to_shape(result_geojson)
         if result_shape.is_empty:
@@ -1239,7 +1259,7 @@ class ToolHandlers:
         try:
             geom = self.gs.get(geometry_ref)
         except KeyError:
-            return {"error": f"Unknown geometry_ref: {geometry_ref}"}
+            return self.gs.unknown_ref_error(geometry_ref)
         lon, lat = geo.centroid(geom)
         point_geojson = {"type": "Point",
                          "coordinates": [round(lon, 6), round(lat, 6)]}
@@ -1256,7 +1276,7 @@ class ToolHandlers:
             try:
                 geom = self.gs.get(ref)
             except KeyError:
-                return {"error": f"Unknown geometry_ref: {ref}"}
+                return self.gs.unknown_ref_error(ref)
             lon, lat = geo.centroid(geom)
             points.append((lon, lat))
         route_geom, distance_km, duration_min, is_estimate = _osrm_route_waypoints(points)
@@ -1276,7 +1296,7 @@ class ToolHandlers:
         try:
             geom = self.gs.get(geometry_ref)
         except KeyError:
-            return {"error": f"Unknown geometry_ref: {geometry_ref}"}
+            return self.gs.unknown_ref_error(geometry_ref)
         lon, lat = geo.centroid(geom)
         weather = _open_meteo_weather(lat, lon)
         if not weather:
@@ -1292,7 +1312,7 @@ class ToolHandlers:
         try:
             geom = self.gs.get(geometry_ref)
         except KeyError:
-            return {"error": f"Unknown geometry_ref: {geometry_ref}"}
+            return self.gs.unknown_ref_error(geometry_ref)
         gtype = geom.get("type", "")
         if gtype == "Point":
             lon, lat = geom["coordinates"][0], geom["coordinates"][1]
@@ -1327,7 +1347,7 @@ class ToolHandlers:
         try:
             geom = self.gs.get(geometry_ref)
         except KeyError:
-            return {"error": f"Unknown geometry_ref: {geometry_ref}"}
+            return self.gs.unknown_ref_error(geometry_ref)
         if geom.get("type") != "LineString":
             return {"error": "Geometry is not a LineString"}
         coords = geom.get("coordinates", [])

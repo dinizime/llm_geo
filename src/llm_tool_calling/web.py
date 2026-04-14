@@ -95,7 +95,7 @@ _TOOL_MESSAGES = {
         "compute_length": lambda a, r: f'{r.get("length_km", "?")} km',
         "find_nearest": lambda a, r: f'{r.get("total", 0)} resultado(s)' + (f' — mais próximo: {r["nearest"][0]["nome"]} ({r["nearest"][0]["distance_km"]} km)' if r.get("nearest") else ""),
         "check_spatial_relation": lambda a, r: ("Interceptam" if r.get("intersects") else "Não interceptam") + (", A contém B" if r.get("a_contains_b") else "") + (", B contém A" if r.get("b_contains_a") else ""),
-        "search_road": lambda a, r: f'{r.get("nome", "?")} — {r.get("extensao_km", "?")} km' if "nome" in r else r.get("error", "?"),
+        "search_road": lambda a, r: f'{r.get("nome", "?")} — {r.get("length_km", "?")} km' if "nome" in r else r.get("error", "?"),
         "list_municipalities_in": lambda a, r: f'{r.get("total", 0)} município(s)',
         "create_point": lambda a, r: f'Ponto criado ({r.get("lat", "?")}, {r.get("lon", "?")})',
         "reverse_geocode": lambda a, r: f'{r.get("municipio", "?")}/{r.get("uf", "?")}' if r.get("municipio") else "Fora de municípios conhecidos",

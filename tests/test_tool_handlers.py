@@ -396,7 +396,7 @@ class TestSearchRoad:
         h = make_handlers()
         r = h.search_road("BR-290")
         assert "geometry_ref" in r
-        assert r["extensao_km"] > 0
+        assert r["length_km"] > 0
 
     def test_not_found(self):
         h = make_handlers()
