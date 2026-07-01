@@ -3,6 +3,7 @@
 import json
 import logging
 import os
+import random
 import time
 from dataclasses import dataclass, field
 from typing import Callable
@@ -152,8 +153,9 @@ def build_system_prompt(mode: str = "default") -> str:
 SYSTEM_PROMPT = build_system_prompt()
 
 MAX_ITERATIONS = 10
-MAX_RETRIES = 4
-RETRY_BASE_DELAY = 5  # seconds, doubles each retry: 5, 10, 20, 40
+MAX_RETRIES = 5
+RETRY_BASE_DELAY = 5  # 429 rate-limit backoff: 10, 20, 40, 80s (respects Retry-After header)
+SERVER_ERROR_BASE_DELAY = 0.5  # 5xx/network transient backoff: ~0.5, 1, 2, 4s (+ jitter)
 MAX_CONSECUTIVE_TOOL_ERRORS = 3  # circuit breaker for tool failures
 
 
@@ -352,7 +354,7 @@ def run_agent(
                 retry_after = getattr(e.response, "headers", {}).get("retry-after")
                 wait = float(retry_after) if retry_after else RETRY_BASE_DELAY * (2 ** (attempt + 1))
                 log.warning("  rate-limited (attempt %d/%d), waiting %.0fs", attempt + 1, MAX_RETRIES, wait)
-                _emit(on_event, {"type": "retry", "message": f"Rate limit, aguardando {wait:.0f}s...", "attempt": attempt + 1})
+                _emit(on_event, {"type": "retry", "message": f"Limite de requisições atingido, aguardando {wait:.0f}s (tentativa {attempt + 1}/{MAX_RETRIES})...", "attempt": attempt + 1})
                 if attempt < MAX_RETRIES - 1:
                     time.sleep(wait)
                     continue
@@ -378,10 +380,10 @@ def run_agent(
                         _geometry_store=geometry_store,
                         _messages=messages,
                     )
-                wait = RETRY_BASE_DELAY * (2 ** attempt)
-                log.warning("  HTTP %d (attempt %d/%d), waiting %.0fs: %s",
+                wait = SERVER_ERROR_BASE_DELAY * (2 ** attempt) + random.uniform(0, 0.4)
+                log.warning("  HTTP %d (attempt %d/%d), waiting %.1fs: %s",
                             e.status_code, attempt + 1, MAX_RETRIES, wait, e.message)
-                _emit(on_event, {"type": "retry", "message": f"Erro HTTP {e.status_code}, tentando novamente...", "attempt": attempt + 1})
+                _emit(on_event, {"type": "retry", "message": f"Servidor do modelo instável (HTTP {e.status_code}), tentando novamente ({attempt + 1}/{MAX_RETRIES})...", "attempt": attempt + 1})
                 if attempt < MAX_RETRIES - 1:
                     time.sleep(wait)
                     continue
@@ -396,9 +398,10 @@ def run_agent(
                     _messages=messages,
                 )
             except Exception as e:
-                wait = RETRY_BASE_DELAY * (2 ** attempt)
-                log.warning("  error (attempt %d/%d), waiting %.0fs: %s",
+                wait = SERVER_ERROR_BASE_DELAY * (2 ** attempt) + random.uniform(0, 0.4)
+                log.warning("  error (attempt %d/%d), waiting %.1fs: %s",
                             attempt + 1, MAX_RETRIES, wait, e)
+                _emit(on_event, {"type": "retry", "message": f"Falha de conexão, tentando novamente ({attempt + 1}/{MAX_RETRIES})...", "attempt": attempt + 1})
                 if attempt < MAX_RETRIES - 1:
                     time.sleep(wait)
                     continue

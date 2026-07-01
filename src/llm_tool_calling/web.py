@@ -273,7 +273,7 @@ def search_stream():
             elif event["type"] == "tool_result":
                 event["message"] = _format_tool_message("tool_result", event["tool"], event["args"], event["result"])
             elif event["type"] == "retry":
-                event["message"] = "Aguardando... tentando novamente"
+                event.setdefault("message", "Aguardando... tentando novamente")
             yield f"data: {json.dumps(event, ensure_ascii=False, default=str)}\n\n"
 
     return Response(generate(), mimetype="text/event-stream", headers={
@@ -332,6 +332,8 @@ h1 { font-size: 1.1em; color: #1a5632; }
     display: flex; align-items: center; gap: 4px;
 }
 .bench-toggle:hover { border-color: #1a5632; color: #1a5632; background: #f0f7f0; }
+.bench-toggle.active { border-color: #1a5632; color: #fff; background: #1a5632; }
+.bench-toggle.active:hover { border-color: #2d7a4a; color: #fff; background: #2d7a4a; }
 
 .panel-body { flex: 1; overflow-y: auto; padding: 12px 16px; }
 
@@ -512,6 +514,7 @@ details summary { cursor: pointer; font-size: 0.85em; color: #888; padding: 4px 
         <div class="panel-header">
             <h1>Geoportal — Assistente Espacial</h1>
             <div style="display:flex;gap:6px;align-items:center">
+                <button class="bench-toggle" id="diag-toggle" onclick="toggleDiag()" title="Mostrar mensagens de diagnóstico de conexão (retentativas ao servidor do modelo)">&#9888; Diagnóstico</button>
                 <button class="bench-toggle" onclick="toggleBenchmark()" title="Banco de perguntas">&#9776; Banco</button>
                 <button class="bench-toggle" onclick="newConversation()" title="Nova conversa">+ Nova</button>
             </div>
@@ -594,6 +597,18 @@ input.addEventListener('keydown', e => { if (e.key === 'Enter') doSearch(); });
 
 let sessionId = null;  // Multi-turn session tracking
 let sessionMetrics = { duration_ms: 0, total_tokens: 0, iterations: 0 };
+
+// Diagnostics: connection-retry messages appear in the feed only when this toggle is ON (default off)
+let showRetryMessages = false;
+try { showRetryMessages = localStorage.getItem('showRetryMessages') === '1'; } catch(e) {}
+function toggleDiag() {
+    showRetryMessages = !showRetryMessages;
+    try { localStorage.setItem('showRetryMessages', showRetryMessages ? '1' : '0'); } catch(e) {}
+    const b = document.getElementById('diag-toggle');
+    if (b) b.classList.toggle('active', showRetryMessages);
+}
+// Reflect stored state on the button at load
+(function(){ const b = document.getElementById('diag-toggle'); if (b) b.classList.toggle('active', showRetryMessages); })();
 
 const SVG_SPINNER = '<svg viewBox="0 0 24 24" fill="none" stroke="#1a5632" stroke-width="2.5"><circle cx="12" cy="12" r="10" stroke-dasharray="31.4 31.4" stroke-linecap="round"/></svg>';
 const SVG_CHECK = '<svg viewBox="0 0 24 24" fill="none" stroke="#2e7d32" stroke-width="2.5"><path d="M5 13l4 4L19 7"/></svg>';
@@ -935,7 +950,7 @@ function handleEvent(ev) {
             finishLastSpinner(ev.message, ev.map_features);
             break;
         case 'retry':
-            addFeedItem(esc(ev.message), SVG_WARN);
+            if (showRetryMessages) addFeedItem(esc(ev.message), SVG_WARN);
             break;
         case 'done':
             finishLastSpinner();
